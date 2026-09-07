@@ -139,9 +139,19 @@ async function main() {
     case 'create': {
       const id = positional(rest).join(' ') || arg(rest, '--path')
       if (!id) { console.error('usage: wiki create PATH --type TYPE [--title T] …'); process.exit(1) }
+      const createType = arg(rest, '--type', '')
+      if (createType) {
+        const { dirname } = await import('node:path')
+        const dir = dirname(id).replace(/\\/g, '/') === '.' ? '' : dirname(id).replace(/\\/g, '/')
+        const gate = await core.gateForType(dataDir, dir, createType)
+        if (gate.needConfirm && !has(rest, '--confirmed')) {
+          console.error(`该写入需用户确认（AGENTS.md 门控规则${gate.via ? ' ' + gate.via : ''}要求 ${createType} 类写入需 human 确认）。先向用户展示并征得同意后加 --confirmed 重试。`)
+          process.exit(2)
+        }
+      }
       const out = await core.createConcept(dataDir, {
         id,
-        type: arg(rest, '--type', ''),
+        type: createType,
         title: arg(rest, '--title'),
         description: arg(rest, '--description'),
         tags: arg(rest, '--tags') ? arg(rest, '--tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined,

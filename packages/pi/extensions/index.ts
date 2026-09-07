@@ -46,7 +46,8 @@ const listVal = (v: unknown): string[] =>
     ? []
     : String(v).split(/\s*,\s*/).filter(Boolean);
 
-function registerTools(pi: ExtensionAPI, dataDir: string): void {
+function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): void {
+  const guidelines = () => (injectSnapshot ? [WIKI_GUIDELINES + injectSnapshot] : [WIKI_GUIDELINES]);
   // wiki_list
   pi.registerTool({
     name: "wiki_list",
@@ -54,7 +55,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     description:
       "列出 llm-wiki 知识库（OKF v0.2 bundle）的目录树与概念清单（type/title/id）。【硬要求】做知识相关工作第一步先调用本工具看全貌。",
     promptSnippet: "知识库列表：知识工作第一步先 wiki_list 看目录树与概念全貌",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({
       type: Type.Optional(Type.String({ description: "按 type 过滤（Table / Attested Computation / Pitfall / Metric…）" })),
       status: Type.Optional(Type.String({ description: "按 status 过滤（draft/stable/deprecated）" })),
@@ -86,7 +87,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     description:
       "搜索 llm-wiki 知识库：匹配 frontmatter（type/title/description/tags）+ 正文；词元拆分、量词后缀兜底、强匹配 ★ 排前；支持 type/tag 过滤。未命中提示 wiki_list / wiki_lint。",
     promptSnippet: "知识库检索：用关键词/type/tag 缩小范围",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({
       query: Type.String({ description: "关键词（空格分隔多词，任一词命中即命中）" }),
       type: Type.Optional(Type.String({ description: "限定 type" })),
@@ -100,7 +101,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
         const core = await loadCore();
         const graph = await core.buildGraph(dataDir);
         const res = core.searchGraph(graph, q, { type: params.type, tag: params.tag, limit: params.limit || 20 });
-        if (!res.length) return ok("无匹配。可 wiki_list 看全貌，或 wiki_lint 查看缺失概念/断链清单。");
+        if (!res.length) return ok("无匹配。若这是工作中遇到的真实表/知识：可用 wiki_create 主动补录（探查事实自动记录；新口径先与用户确认）。或 wiki_list 看全貌 / wiki_lint 看缺失。");
         return ok(res.map((r: any) => `${r.strong ? "★" : ""}${r.type}: ${r.title}  (${r.id})\n    ${r.description || ""}`).join("\n"));
       } catch (e) {
         return err(e);
@@ -114,13 +115,13 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     label: "Wiki Get",
     description: "读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。",
     promptSnippet: "知识库明细：按 id/title 读单个概念全文 + backlinks",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({ id: Type.String({ description: "Concept ID（如 tables/orders）或 title" }) }),
     async execute(_id, params) {
       try {
         const core = await loadCore();
         const got = await core.getConcept(dataDir, params.id);
-        if (!got) return ok(`未找到: ${params.id}。可 wiki_list 看全貌。`);
+        if (!got) return ok(`未找到: ${params.id}。若这是真实表/概念可用 wiki_create 主动补录。或 wiki_list 看全貌。`);
         if (got.ambiguous) return ok(`标题「${params.id}」有多个候选: ${got.candidates.join(", ")}。请用完整 id。`);
         const lines = [
           `# ${got.title}  (${got.id})`,
@@ -148,7 +149,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     description:
       "新增概念（纯 OKF frontmatter：type 必填 + title/description/tags…；完整字段说明查 wiki_help frontmatter：sources/stale_after 按需手写，generated/verified 由 confirmed 自动维护）。写入门控完全由目标目录链 AGENTS.md 的「## 门控」声明决定（子目录覆盖父目录；链上无声明则默认全部自动记录），需确认的类型以 confirmed:true 调用带 human verified。自动维护 log.md/index.md。",
     promptSnippet: "知识库写入：新增概念；目录 AGENTS.md 门控决定是否需 confirmed:true",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({
       path: Type.String({ description: "Concept ID（bundle 相对路径，不含 .md，如 tables/orders）" }),
       type: Type.String({ description: "OKF type（Table / Attested Computation / Pitfall / Reference / Metric / Playbook…）" }),
@@ -193,7 +194,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     label: "Wiki Update",
     description: "更新已有概念：只更新传入字段；trust 自动刷新；confirmed 追加 human verified。",
     promptSnippet: "知识库更新：改已有概念字段/正文",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({
       id: Type.String({ description: "Concept ID" }),
       title: Type.Optional(Type.String()),
@@ -230,7 +231,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     label: "Wiki Validate",
     description: "校验知识库 OKF v0.2 合规（非保留 .md 有 frontmatter + 非空 type；保留文件结构）。缺可选字段/断链不判失败。",
     promptSnippet: "知识库校验：新增/修改后确认 OKF 合规",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({}),
     async execute() {
       try {
@@ -252,7 +253,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     label: "Wiki Lint",
     description: "知识库体检：断链（提及但无目标=未写入知识）、孤儿页、过期（stale_after）、缺 index、缺 description、重复标题。",
     promptSnippet: "知识库体检：断链/孤儿/过期/缺 index",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({}),
     async execute() {
       try {
@@ -273,7 +274,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     label: "Wiki Ingest",
     description: "登记外部源文件进知识库（copy 不改源，生成 type: Reference 来源概念页），供后续提炼写入。",
     promptSnippet: "知识库收录：把外部源文件登记进 bundle",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({
       source: Type.String({ description: "外部源文件绝对路径" }),
       ref_dir: Type.Optional(Type.String({ description: "登记目录（缺省 references）" })),
@@ -295,7 +296,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     label: "Wiki Deprecate",
     description: "目录级批量停用：把某目录（含子目录）下全部概念标 status: deprecated（数据零删除，可恢复）。",
     promptSnippet: "知识库停用：整目录批量标 deprecated",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({ path: Type.Optional(Type.String({ description: "目录（bundle 相对，如 tables；空=全库）" })) }),
     async execute(_id, params) {
       try {
@@ -314,7 +315,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     label: "Wiki Rules",
     description: "查看某目录生效的 AGENTS.md 规则（向上遍历取最近、子覆盖父），写入前先看它确认门控。",
     promptSnippet: "知识库规则：写入前查看目录 AGENTS.md 门控",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({ path: Type.Optional(Type.String({ description: "目录（bundle 相对，空=根）" })) }),
     async execute(_id, params) {
       try {
@@ -334,7 +335,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     label: "Wiki Help",
     description: "查 llm-wiki 机制文档：保留文件一览 / 怎么写目录 AGENTS.md / 怎么写 APPEND_SYSTEM_PROMPT.md（分类行为注入）/ OKF frontmatter 速查 / 门控判定逻辑。想给分类加行为规则或门控时先查它。",
     promptSnippet: "机制文档：查保留文件/AGENTS/APPEND 写法",
-    promptGuidelines: WIKI_GUIDELINES,
+    promptGuidelines: guidelines(),
     parameters: Type.Object({ topic: Type.Optional(Type.String({ description: "主题：quickstart | files | agents | append | frontmatter | gate（缺省 quickstart）" })) }),
     async execute(_id, params) {
       try {
@@ -350,8 +351,28 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
 /**
  * Pi 扩展默认导出：注册 11 个 wiki_* 工具。
  * 数据目录可用环境变量 PI_WIKI_DATA_DIR 覆盖（默认 ~/.agents/wiki）。
+ *
+ * 启动快照：加载时读一次各目录 APPEND_SYSTEM_PROMPT.md，把目录清单与正文
+ * 并入 guidelines。做不到 DSH 的每轮更新（pi 无 system-prompt 瀑布钩子），
+ * 但保证 agent 在会话启动时见过一次注入规则全文，而不只是「有这机制」一句话。
+ * 若启动后 APPEND 文件变化，agent 可用 wiki_rules 按需重读。
  */
-export default function (pi: ExtensionAPI, _ctx?: ExtensionContext): void {
+export default async function (pi: ExtensionAPI, _ctx?: ExtensionContext): Promise<void> {
   const dataDir = process.env.PI_WIKI_DATA_DIR || DEFAULT_DATA_DIR;
-  registerTools(pi, dataDir);
+  let extra = "";
+  try {
+    const core = await loadCore();
+    const prompts = await core.collectInjectPrompts(dataDir);
+    if (prompts.length) {
+      const parts = prompts.map((p: any) =>
+        p.dir ? `### [${p.dir}]\n${p.content}` : `### (bundle 根规则)\n${p.content}`,
+      );
+      extra =
+        "\n【知识库自定义规则快照】以下为各目录 APPEND_SYSTEM_PROMPT.md 在扩展加载时的内容（后续变更用 wiki_rules 按需重读）：\n" +
+        parts.join("\n\n");
+    }
+  } catch {
+    // 读不到不影响工具注册（静默降级）
+  }
+  registerTools(pi, dataDir, extra);
 }

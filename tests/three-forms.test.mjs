@@ -45,7 +45,7 @@ describe("three forms consistency", () => {
     process.env.PI_WIKI_DATA_DIR = tmpDir;
     const piMod = await import(join(__dirname, "..", "packages", "pi", "extensions", "index.ts"));
     const tools = new Map();
-    piMod.default({ registerTool: (d) => tools.set(d.name, d) }, {});
+    await piMod.default({ registerTool: (d) => tools.set(d.name, d) }, {});
     const got = await tools.get("wiki_get").execute("id", { id: "tables/three_probe" }, undefined, undefined, {});
     assert.match(got.text, /Three Probe/);
     delete process.env.PI_WIKI_DATA_DIR;

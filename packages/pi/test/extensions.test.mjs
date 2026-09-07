@@ -37,7 +37,7 @@ describe("pi-wiki extension", () => {
     const extMod = await import(join(__dirname, "..", "extensions", "index.ts"));
     const mocked = mockPi();
     registered = mocked.tools;
-    extMod.default(mocked.api, {});
+    await extMod.default(mocked.api, {});
   });
 
   after(async () => {
