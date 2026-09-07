@@ -35,9 +35,9 @@ llm-wiki/
 
 三形态读写**同一份 bundle**、行为一致——都复用 `packages/core`，无重复实现。
 
-## 工具（10 个）
+## 工具（11 个）
 
-`wiki_list` · `wiki_search` · `wiki_get`（附 backlinks）· `wiki_create` · `wiki_update` · `wiki_validate` · `wiki_lint` · `wiki_ingest` · `wiki_deprecate` · `wiki_rules`
+`wiki_list` · `wiki_search` · `wiki_get`（附 backlinks）· `wiki_create` · `wiki_update` · `wiki_validate` · `wiki_lint` · `wiki_ingest` · `wiki_deprecate` · `wiki_rules` · `wiki_help`
 
 ## 快速开始
 
@@ -58,7 +58,7 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 ## 测试
 
 ```bash
-node scripts/smoke-test.mjs              # 27 项：core 9 工具 + ingest/lint/migrate 端到端
+node scripts/smoke-test.mjs              # 27 项：core 10 工具链 + ingest/lint/migrate 端到端
 node tests/dsh-mock-test.mjs             # 12 项：DSH 插件（mock 宿主）工具注册 + 描述层 + 门控
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 9 项：pi 扩展（mock pi）
 node --test tests/three-forms.test.mjs   # 4 项：三形态读写同一 bundle 一致性

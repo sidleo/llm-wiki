@@ -1,7 +1,7 @@
 # dsh-wiki — DSH 插件（llm-wiki 知识库）
 
 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 提供的
-llm-wiki 通用知识库插件：**复用 `llm-wiki-core`（与 pi 扩展 / skill CLI 同一实现）**，
+llm-wiki 通用知识库插件：**内嵌 vendor-core，与 pi 扩展 / skill CLI 同一实现**（`packages/dsh/scripts/sync-vendor.mjs` 从 `packages/core` 同步），
 读写同一份 OKF v0.2 bundle（默认 `~/.agents/wiki`）。
 
 ## 安装
@@ -21,9 +21,9 @@ dsh plugin --profile web add link:/path/to/packages/dsh
 - **描述层注入**（可选宿主优化）：每轮 system prompt 注入精简 section——bundle 路径 +
   目录树摘要 + 工具用法 + 【硬要求】第一步先 `wiki_list`。与 dsh-kb 同机制
   （`system-prompt/assemble` 瀑布，apply 同步注册，异步读盘不外抛）。
-- **10 个工具**：`wiki_list` / `wiki_search` / `wiki_get`（附 backlinks）/ `wiki_create` /
+- **11 个工具**：`wiki_list` / `wiki_search` / `wiki_get`（附 backlinks）/ `wiki_create` /
   `wiki_update` / `wiki_validate` / `wiki_lint` / `wiki_ingest` / `wiki_deprecate` /
-  `wiki_rules`。
+  `wiki_rules` / `wiki_help`（机制文档自助查）。
 - **门控**：写入前读目标目录 AGENTS.md 规则（`wiki_rules`），需 human 确认的类型经
   agent 交互确认后带 `verified`（无代码强制弹窗；格式仍是纯 OKF）。
 
@@ -47,7 +47,7 @@ dsh plugin --profile web add link:/path/to/packages/dsh
 
 ```bash
 node --check wiki.mjs
-node tests/dsh-mock-test.mjs        # 宿主无关 mock：10 工具注册 + 描述层 + 门控
+node tests/dsh-mock-test.mjs        # 宿主无关 mock：11 工具注册 + 描述层 + 门控
 ```
 
 ## 依赖

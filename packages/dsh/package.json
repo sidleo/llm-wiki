@@ -1,7 +1,7 @@
 {
   "name": "@sidleo3/dsh-wiki",
   "version": "0.1.0",
-  "description": "DSH plugin for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle (tables/computations/pitfalls/metrics) with ingest/lint/deprecate. Registers wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules tools and a progressive-disclosure description section.",
+  "description": "DSH plugin for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle with progressive disclosure. Registers 11 tools: wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules/help. Self-contained (vendor-core embedded).",
   "type": "module",
   "main": "wiki.mjs",
   "exports": {
@@ -23,5 +23,8 @@
       "patch": "./cordis.patch.yml"
     }
   },
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "sync-vendor": "node scripts/sync-vendor.mjs"
+  }
 }
