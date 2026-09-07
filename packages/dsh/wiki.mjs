@@ -1,7 +1,7 @@
 /**
  * dsh-wiki —— DSH 宿主插件（llm-wiki 通用知识库，纯 OKF v0.2）。
  *
- * 复用 llm-wiki-core（packages/core）的全部逻辑；本文件只做宿主适配：
+ * 复用 @sidleo3/llm-wiki-core（packages/core）的全部逻辑；本文件只做宿主适配：
  * - 描述层注入（system-prompt/assemble 瀑布，可选宿主优化）
  * - 注册 9 个 wiki_* 工具
  * - 写入门控：读 AGENTS.md 规则后由 agent 交互确认（无代码强制弹窗）

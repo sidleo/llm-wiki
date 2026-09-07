@@ -36,7 +36,7 @@ async function loadCore() {
       readFileSync(devCore)
       return await import(devCore + '?t=' + Date.now())
     } catch {
-      return await import('llm-wiki-core')
+      return await import('@sidleo3/llm-wiki-core')
     }
   }
 }

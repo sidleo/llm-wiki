@@ -1,7 +1,7 @@
 /**
  * pi-wiki — Pi 扩展（llm-wiki 通用知识库，OKF v0.2）。
  *
- * 复用 llm-wiki-core 的全部逻辑（与 DSH 插件 / skill CLI 同一实现），
+ * 复用 @sidleo3/llm-wiki-core 的全部逻辑（与 DSH 插件 / skill CLI 同一实现），
  * 注册 11 个 wiki_* 工具 + prompt 引导。数据目录默认 ~/.agents/wiki，
  * 环境变量 PI_WIKI_DATA_DIR 覆盖。
  *

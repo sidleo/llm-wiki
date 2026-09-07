@@ -52,7 +52,7 @@ node tests/dsh-mock-test.mjs        # 宿主无关 mock：11 工具注册 + 描�
 
 ## 依赖
 
-运行时需 `llm-wiki-core` npm 包（发布后）；开发态自动优先加载本仓库 `packages/core`。
+运行时自包含（vendor-core 内嵌，`npm run sync-vendor` 从仓库 `packages/core` 同步）；独立引用 core 可用 `@sidleo3/llm-wiki-core`。
 
 ## 许可
 

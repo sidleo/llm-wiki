@@ -1,7 +1,7 @@
 {
   "name": "llm-wiki-skill",
   "version": "0.1.0",
-  "description": "llm-wiki skill bundle: SKILL.md instructions + wiki CLI (mirrors llm-wiki-core tools) for any agent harness that loads Agent Skills.",
+  "description": "llm-wiki skill bundle: SKILL.md instructions + wiki CLI (mirrors @sidleo3/llm-wiki-core tools) for any agent harness that loads Agent Skills.",
   "type": "module",
   "bin": {
     "wiki": "./bin/wiki.mjs"

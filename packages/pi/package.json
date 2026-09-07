@@ -1,7 +1,7 @@
 {
   "name": "@sidleo3/pi-wiki",
   "version": "0.1.0",
-  "description": "Pi extension for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle. Reuses llm-wiki-core (same implementation as the dsh plugin and skill CLI), registering wiki_list / wiki_search / wiki_get / wiki_create / wiki_update / wiki_validate / wiki_lint / wiki_ingest / wiki_deprecate / wiki_rules tools.",
+  "description": "Pi extension for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle. Reuses @sidleo3/llm-wiki-core (same implementation as the dsh plugin and skill CLI), registering wiki_list / wiki_search / wiki_get / wiki_create / wiki_update / wiki_validate / wiki_lint / wiki_ingest / wiki_deprecate / wiki_rules tools.",
   "author": "sidleo",
   "license": "MIT",
   "type": "module",

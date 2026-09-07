@@ -1,5 +1,5 @@
 {
-  "name": "llm-wiki-core",
+  "name": "@sidleo3/llm-wiki-core",
   "version": "0.1.0",
   "description": "llm-wiki core: OKF v0.2-conformant knowledge bundle engine (parse, links, search, validate, lint, index/log, rules, ingest, migrate). Shared by the dsh plugin, pi extension and skill CLI.",
   "type": "module",

@@ -27,9 +27,9 @@ await writeFile(
   join(vendor, 'package.json'),
   JSON.stringify(
     {
-      name: 'llm-wiki-core-vendor',
+      name: '@sidleo3/llm-wiki-core-vendor',
       version: corePkg.version,
-      description: 'llm-wiki-core vendored into @sidleo3/pi-wiki (auto-generated; do not edit)',
+      description: '@sidleo3/llm-wiki-core vendored into @sidleo3/pi-wiki (auto-generated; do not edit)',
       type: 'module',
       main: 'index.mjs',
     },

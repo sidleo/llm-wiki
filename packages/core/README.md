@@ -1,4 +1,4 @@
-# llm-wiki-core
+# @sidleo3/llm-wiki-core
 
 llm-wiki 通用知识库的共享核心引擎（Node ESM，零外部依赖）。
 
@@ -10,7 +10,7 @@ lint、index/log 维护、AGENTS.md / APPEND_SYSTEM_PROMPT.md 规则解析（向
 （后两者内嵌 vendor-core 自包含，本包供仓库开发态/自定义集成引用）。
 
 ```js
-import { validateBundle, buildGraph, searchGraph } from 'llm-wiki-core'
+import { validateBundle, buildGraph, searchGraph } from '@sidleo3/llm-wiki-core'
 ```
 
 详细用法与格式规范见仓库根 README / schema.md / SPEC-EXTENSIONS.md。
