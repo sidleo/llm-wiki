@@ -128,7 +128,7 @@ function linkifyBody(body, tableIds) {
   const re = /`([a-z0-9_.]+)`/gi
   b = b.replace(re, (full, name) => {
     const lower = name.toLowerCase()
-    if (tableIds.has(lower)) return `[${name}](/tables/${lower}.md)`
+    if (tableIds.has(lower)) return `[${name}](/sqlkb/tables/${lower}.md)`
     return full
   })
   return b
