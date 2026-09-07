@@ -13,24 +13,58 @@ import { join, dirname } from 'node:path'
 import { buildGraph } from './bundle.mjs'
 import { splitFrontmatter } from './doc.mjs'
 
-/** 渲染某目录的 index.md 正文（dir='' = 根目录全库视图）。 */
+/**
+ * 渲染 index.md 正文。
+ * - dir=''（根）：按目录分组渲染全库概念 + 子目录链接
+ * - dir='xxx'：渲染该目录下的全部概念（含子目录，链接用相对路径）
+ */
 export function renderIndexBody(graph, dir) {
-  const prefix = dir ? dir + '/' : ''
-  const items = [...graph.nodes]
-    .filter(([id]) => {
-      const d = dirname(id).replace(/\\/g, '/')
-      return (d === '.' ? '' : d) === dir
-    })
-    .map(([, c]) => c)
-    .sort((a, b) => a.title.localeCompare(b.title, 'zh'))
   const lines = [`# ${dir || 'Knowledge Bundle'}`, '']
-  for (const c of items) {
-    const rel = c.id.startsWith(prefix) ? c.id.slice(prefix.length) : c.id
-    const desc = c.desc ? ` — ${c.desc}` : ''
-    lines.push(`* [${c.title}](${rel}.md)${desc}  \`${c.type}\``)
+  if (dir) {
+    const prefix = dir + '/'
+    const items = [...graph.nodes]
+      .filter(([id]) => id.startsWith(prefix))
+      .sort((a, b) => a[1].title.localeCompare(b[1].title, 'zh'))
+    for (const [id, c] of items) {
+      const rel = id.slice(prefix.length)
+      const desc = c.desc ? ` — ${c.desc}` : ''
+      lines.push(`* [${c.title}](${rel}.md)${desc}  \`${c.type}\``)
+    }
+    lines.push('')
+    return lines.join('\n').trimEnd() + '\n'
   }
-  lines.push('')
+  // 根视图：按一级目录分组
+  const groups = new Map() // 一级目录名 -> [{id,title,desc,type,rel}]
+  for (const [id, c] of graph.nodes) {
+    const segs = id.split('/')
+    const top = segs.length > 1 ? segs[0] : ''
+    if (!groups.has(top)) groups.set(top, [])
+    const rel = segs.length > 1 ? segs.slice(1).join('/') : id
+    groups.get(top).push({ id, title: c.title, desc: c.desc, type: c.type, rel })
+  }
+  const keys = [...groups.keys()].sort()
+  for (const k of keys) {
+    if (k === '') {
+      // 根目录散落概念
+      lines.push('## (root)', '')
+      for (const it of groups.get('').sort((a, b) => a.title.localeCompare(b.title, 'zh'))) {
+        lines.push(indexLine(it))
+      }
+      lines.push('')
+      continue
+    }
+    lines.push(`## ${k}`, '')
+    for (const it of groups.get(k).sort((a, b) => a.title.localeCompare(b.title, 'zh'))) {
+      lines.push(indexLine(it))
+    }
+    lines.push('')
+  }
   return lines.join('\n').trimEnd() + '\n'
+}
+
+function indexLine(it) {
+  const desc = it.desc ? ` — ${it.desc}` : ''
+  return `* [${it.title}](${it.rel}.md)${desc}  \`${it.type}\``
 }
 
 /**
