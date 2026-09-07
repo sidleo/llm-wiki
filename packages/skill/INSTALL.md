@@ -1,12 +1,28 @@
 # 安装 skill 版（大部分 agent 通用）
 
 skill 版 = `SKILL.md` 说明 + `wiki` CLI，任何支持 Agent Skills 的宿主
-（Claude Code / Codex / Cursor / DSH / pi 等）都能通过读取同一份
+（Claude Code / Codex / Cursor / DSH / pi / Workbuddy 等）都能通过读取同一份
 `SKILL.md` 并使用同一份数据 bundle。
 
-## 1. 安装 CLI
+## 方式 A：自包含打包（推荐，零外部依赖）
 
-把 `wiki` 放进 PATH（三选一）：
+生成一个可整体复制进任意宿主 skills 目录的自包含目录（含 CLI + 全部 core）：
+
+```bash
+node packages/skill/scripts/build-standalone.mjs --target /tmp/wiki-skill
+# 产物：SKILL.md + scripts/{wiki.mjs, install.sh, wiki-core/}
+
+# 安装 CLI 到 PATH：
+bash /tmp/wiki-skill/scripts/install.sh
+
+# 放进宿主的 skills 目录（示例：workbuddy）
+mkdir -p ~/.workbuddy/skills/wiki
+cp -r /tmp/wiki-skill/. ~/.workbuddy/skills/wiki/
+```
+
+## 方式 B：从本仓库直接使用
+
+把 CLI 放进 PATH（三选一）：
 
 ```bash
 # 方式 A：软链（推荐，仓库更新即同步）
@@ -22,20 +38,6 @@ node packages/skill/bin/wiki.mjs list
 
 验证：`wiki list --dataDir examples/demo-bundle`
 
-## 2. 让 agent 加载 SKILL.md
-
-按你宿主的 skill 机制放入 skills 目录，例如：
-
-```bash
-# DSH / 通用 Agent Skills 惯例
-mkdir -p ~/.agents/skills/wiki
-cp packages/skill/SKILL.md ~/.agents/skills/wiki/SKILL.md
-ln -s "$(pwd)/packages/skill/bin/wiki.mjs" /usr/local/bin/wiki   # CLI 已在 PATH
-```
-
-`SKILL.md` 的 `metadata.requires.bins: ["wiki"]` 声明依赖 `wiki` 命令，
-宿主会提示/校验该 bin 可用。
-
 ## 3. 数据目录
 
 - 默认 `~/.agents/wiki`
@@ -43,4 +45,7 @@ ln -s "$(pwd)/packages/skill/bin/wiki.mjs" /usr/local/bin/wiki   # CLI 已在 PA
 - 首次使用可用 `examples/demo-bundle` 当参考；真实知识按
   `scripts/migrate.mjs` 从旧 kb/sqlkb 迁移，或直接 `wiki create` 建概念。
 
-## 4. 只读命令无需任何授权；写命令按 SKILL.md 的门控规范执行。
+## 4. 宿主加载与授权
+
+- 把含 `SKILL.md` 的目录放进宿主 skills 目录即被识别（`metadata.requires.bins: ["wiki"]` 声明依赖 `wiki` 命令）。
+- 只读命令（list/search/get/validate/lint/rules）无需任何授权；写命令（create/update/ingest/deprecate）按 SKILL.md 的门控规范执行（口径类先向用户确认）。
