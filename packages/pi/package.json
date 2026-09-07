@@ -18,7 +18,8 @@
   "files": [
     "extensions/",
     "vendor-core/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [

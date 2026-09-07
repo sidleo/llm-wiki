@@ -13,7 +13,7 @@
 ```
 llm-wiki/
 ├── schema.md               # 格式规范唯一事实源（OKF v0.2 对齐）
-├── SPEC-EXTENSIONS.md      # 对 OKF 的唯一扩展声明（AGENTS.md 第三类保留文件）
+├── SPEC-EXTENSIONS.md      # 对 OKF 的扩展声明（AGENTS.md / APPEND_SYSTEM_PROMPT.md 保留文件）
 ├── packages/
 │   ├── core/               # 共享核心：解析/链接图/检索/校验/lint/index-log/规则解析/migrate
 │   ├── dsh/                # DSH 插件 → npm @sidleo3/dsh-wiki
@@ -58,9 +58,9 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 ## 测试
 
 ```bash
-node scripts/smoke-test.mjs              # 27 项：core 10 工具链 + ingest/lint/migrate 端到端
-node tests/dsh-mock-test.mjs             # 12 项：DSH 插件（mock 宿主）工具注册 + 描述层 + 门控
-(cd packages/pi && npm install --legacy-peer-deps && npm test)   # 9 项：pi 扩展（mock pi）
+node scripts/smoke-test.mjs              # 27 项：core 工具链 + ingest/lint/migrate 端到端
+node tests/dsh-mock-test.mjs             # 16 项：DSH 插件（mock 宿主）工具注册 + 描述层 + 门控
+(cd packages/pi && npm install --legacy-peer-deps && npm test)   # 11 项：pi 扩展（mock pi）
 node --test tests/three-forms.test.mjs   # 4 项：三形态读写同一 bundle 一致性
 ```
 
