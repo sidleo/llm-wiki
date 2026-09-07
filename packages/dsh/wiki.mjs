@@ -267,6 +267,7 @@ export function apply(ctx, config) {
     name: 'wiki_create',
     description: [
       '新增概念到 llm-wiki 知识库（纯 OKF frontmatter：type 必填 + title/description/tags/…）。',
+      '完整字段说明查 wiki help frontmatter：sources（来源，{id,resource,…}，正文用[^id]引用）/ stale_after（绝对过期时刻 ISO8601）/ status 按需手写；generated 与 verified 由 confirmed 自动维护，一般不用手写。',
       '写入门控：是否需要用户确认，完全由目标目录 AGENTS.md 的「## 门控」声明决定（该声明列出需 human 确认的 type；未声明则全部自动记录）。各分类可自行定义；confirmed: true 调用带 human verified。',
       '写入后自动维护 log.md 与 index.md。',
     ].join('\n'),

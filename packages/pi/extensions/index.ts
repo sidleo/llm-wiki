@@ -146,7 +146,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
     name: "wiki_create",
     label: "Wiki Create",
     description:
-      "新增概念（纯 OKF frontmatter：type 必填 + title/description/tags…）。写入门控完全由目标目录链 AGENTS.md 的「## 门控」声明决定（子目录覆盖父目录；链上无声明则默认全部自动记录），需确认的类型以 confirmed:true 调用带 human verified。自动维护 log.md/index.md。",
+      "新增概念（纯 OKF frontmatter：type 必填 + title/description/tags…；完整字段说明查 wiki_help frontmatter：sources/stale_after 按需手写，generated/verified 由 confirmed 自动维护）。写入门控完全由目标目录链 AGENTS.md 的「## 门控」声明决定（子目录覆盖父目录；链上无声明则默认全部自动记录），需确认的类型以 confirmed:true 调用带 human verified。自动维护 log.md/index.md。",
     promptSnippet: "知识库写入：新增概念；目录 AGENTS.md 门控决定是否需 confirmed:true",
     promptGuidelines: WIKI_GUIDELINES,
     parameters: Type.Object({

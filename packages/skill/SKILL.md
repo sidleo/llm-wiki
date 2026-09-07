@@ -81,7 +81,8 @@ metadata:
 - **写前先 `wiki rules <目标目录>`**：看该目录 AGENTS.md 规则是否要求 human 确认。
 - 需确认的（如口径类）：先向用户确认，用户同意后加 `--confirmed`（并把 `WIKI_USER` 设为用户名），写入会带 `verified: [{by: human:<user>}]`。
 - 探查事实（表结构等）：可直接 `wiki create`（自动写 `generated: {by: agent…}`，无 verified = unverified 态，可消费但标未确认）。
-- frontmatter 只用 OKF 字段：`type`(必填) / `title` / `description` / `tags` / `sources` / `generated` / `verified` / `status` / `stale_after`；Attested Computation 用 `runtime`/`parameters`/`computation`/`executor`/`attester`。**不引入自定义字段**。
+- frontmatter 只用 OKF 字段：`type`(必填) / `title` / `description` / `tags` / `sources` / `generated` / `verified` / `status` / `stale_after`；Attested Computation 用 `runtime`/`parameters`/`computation`/`executor`/`attester`。**不引入自定义字段**。字段格式细节查 `wiki help frontmatter`。
+- 分工：`generated`/`verified` 由 confirmed 自动维护（一般不用手写）；`sources`/`stale_after`/`status` 按需手写。
 - 正文引用相关概念用 markdown 链接 `/path.md` 或 `[[wiki-link]]`；读到引用即代表关系。
 
 ## 7. 数据与格式约定
