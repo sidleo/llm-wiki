@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+pnpm-lock.yaml
+*.tgz
+package-lock.json
+
+# 用户私有知识 bundle（真实迁移目标，不进仓库）
+~/.agents/wiki/
+.agents/
