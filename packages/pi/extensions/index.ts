@@ -179,7 +179,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
           body: params.body,
           tags: listVal(params.tags),
           status: params.status,
-          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "pi-wiki", version: "0.1.0" },
+          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.1.0" },
         });
         return ok(`已创建 ${created.id}`);
       } catch (e) {
@@ -216,7 +216,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
           type: params.type,
           status: params.status,
           tags: params.tags !== undefined ? listVal(params.tags) : undefined,
-          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "pi-wiki", version: "0.1.0" },
+          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.1.0" },
         });
         return ok(`已更新 ${params.id}`);
       } catch (e) {
@@ -282,7 +282,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute(_id, params) {
       try {
         const core = await loadCore();
-        const r = await core.ingestSource(dataDir, { source: params.source, refDir: params.ref_dir }, { producer: "pi-wiki", version: "0.1.0" });
+        const r = await core.ingestSource(dataDir, { source: params.source, refDir: params.ref_dir }, { producer: "@sidleo3/pi-wiki", version: "0.1.0" });
         return ok(`ingested → ${r.refPath}${r.existed ? " (existed)" : ""}; 来源概念 ${r.sourceConceptId}`);
       } catch (e) {
         return err(e);

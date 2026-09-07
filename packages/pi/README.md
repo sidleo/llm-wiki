@@ -1,4 +1,4 @@
-# pi-wiki — Pi 的 llm-wiki 知识库扩展
+# @sidleo3/pi-wiki — Pi 的 llm-wiki 知识库扩展
 
 为 [Pi](https://github.com/earendil-works/pi)（AI coding agent）提供 llm-wiki 通用知识库访问：
 **内嵌 vendor-core，与 DSH 插件 `@sidleo3/dsh-wiki` / skill CLI 完全相同的实现**，读写同一份
@@ -29,7 +29,7 @@ Pi 会话注入 11 个工具 + prompt 引导：
 pi install /path/to/packages/pi
 
 # 或发布后
-pi install npm:pi-wiki
+pi install npm:@sidleo3/pi-wiki
 ```
 
 ## 配置

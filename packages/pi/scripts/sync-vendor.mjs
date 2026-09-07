@@ -29,7 +29,7 @@ await writeFile(
     {
       name: 'llm-wiki-core-vendor',
       version: corePkg.version,
-      description: 'llm-wiki-core vendored into pi-wiki (auto-generated; do not edit)',
+      description: 'llm-wiki-core vendored into @sidleo3/pi-wiki (auto-generated; do not edit)',
       type: 'module',
       main: 'index.mjs',
     },

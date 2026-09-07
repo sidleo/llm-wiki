@@ -17,7 +17,7 @@ llm-wiki/
 ├── packages/
 │   ├── core/               # 共享核心：解析/链接图/检索/校验/lint/index-log/规则解析/migrate
 │   ├── dsh/                # DSH 插件 → npm @sidleo3/dsh-wiki
-│   ├── pi/                 # pi 扩展 → npm pi-wiki
+│   ├── pi/                 # pi 扩展 → npm @sidleo3/pi-wiki
 │   └── skill/              # skill 版 → SKILL.md + CLI `wiki`
 ├── examples/demo-bundle/   # 脱敏合成示例 bundle（Obsidian 可直接打开）
 ├── scripts/                # migrate.mjs / smoke-test.mjs
@@ -30,7 +30,7 @@ llm-wiki/
 | 形态 | 安装 | 能力 |
 |------|------|------|
 | DSH 插件 | `dsh plugin --profile web add @sidleo3/dsh-wiki` | 每轮描述层注入（可选优化）+ `wiki_*` 工具 |
-| pi 扩展 | `pi install npm:pi-wiki` | `wiki_*` 工具 + prompt 引导 |
+| pi 扩展 | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` 工具 + prompt 引导 |
 | skill + CLI | `~/.agents/skills/wiki/`（见 packages/skill/INSTALL.md） | SKILL.md 引导 + `wiki` CLI（任意 agent 可用） |
 
 三形态读写**同一份 bundle**、行为一致——都复用 `packages/core`，无重复实现。
