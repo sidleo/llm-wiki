@@ -107,6 +107,11 @@ export function apply(ctx, config) {
       '- wiki_create / wiki_update — 写入（门控读目录 AGENTS.md 规则，确认后带 human verified）',
       '- wiki_validate — OKF v0.2 合规校验；wiki_lint — 体检（断链/孤儿/过期/缺 index）',
       '- wiki_ingest — 登记外部源文件进 bundle；wiki_deprecate — 目录级批量停用（status: deprecated）',
+      '【主动知识记录】工作中遇到以下情况，主动沉淀到知识库（不依赖用户特意吩咐）：',
+      '- 用了库中不存在的表 → 探查其结构后 `wiki_create`（type: Table）自动记录，无需确认',
+      '- SQL 出错/踩坑 → `wiki_create`（type: Pitfall）记录错误示例与正确做法，自动沉淀',
+      '- 与用户确认过的新口径/新示例 → 向用户展示后 `wiki_create`（type: Metric 或 Attested Computation，带 confirmed 写入 human verified）',
+      '- 检索未命中时：若确属缺失知识且事实已确认 → 建概念补录；任务收尾用 `wiki_lint` 看断链/缺失清单',
       '',
       ...tree.map((t) => {
         const dep = t.concepts.filter((c) => c.status === 'deprecated').length
@@ -206,7 +211,7 @@ export function apply(ctx, config) {
         const c = await loadCore()
         const graph = await c.buildGraph(dataDir)
         const res = c.searchGraph(graph, q, { type: args.type, tag: args.tag, limit: Number(args.limit) || 20 })
-        if (!res.length) return { text: '无匹配。可 wiki_list 看全貌，或 wiki_lint 查看缺失概念/断链清单。' }
+        if (!res.length) return { text: '无匹配。若你正在用的表/知识确实不在库中：这是主动记录信号——探查其结构后用 wiki_create 建概念（Table 自动记录无需确认；新口径展示给用户确认后建 Metric/Attested Computation）。也可 wiki_list 看全貌或 wiki_lint 看缺失清单。' }
         const lines = res.map((r) => `${r.strong ? '★' : ''}${r.type}: ${r.title}  (${r.id})\n    ${r.description || ''}`)
         return { text: lines.join('\n').slice(0, maxGetChars) }
       } catch (e) { return strErr(e) }
@@ -227,7 +232,7 @@ export function apply(ctx, config) {
       try {
         const c = await loadCore()
         const got = await c.getConcept(dataDir, args.id)
-        if (!got) return { text: `未找到: ${args.id}。可 wiki_list 看全貌。` }
+        if (!got) return { text: `未找到: ${args.id}。若这是你工作中遇到的真实表/概念，可用 wiki_create 主动补录（探查事实自动记录）。或 wiki_list 看全貌。` }
         if (got.ambiguous) return { text: `标题「${args.id}」有多个候选: ${got.candidates.join(', ')}。请用完整 id。` }
         const lines = [
           `# ${got.title}  (${got.id})`,
@@ -251,7 +256,7 @@ export function apply(ctx, config) {
     name: 'wiki_create',
     description: [
       '新增概念到 llm-wiki 知识库（纯 OKF frontmatter：type 必填 + title/description/tags/…）。',
-      '写入门控：自动记录（表结构等探查事实）直接写；需用户确认的内容先展示并征得同意后以 confirmed: true 调用。',
+      '【主动记录】工作中发现库中没有的表/踩到的坑 → 主动用本工具沉淀：type: Table（探查事实）直接写无需确认；type: Pitfall（踩坑）直接写；type: Metric/Attested Computation（新口径/示例）先向用户展示征得同意后以 confirmed: true 调用（写入 human verified）。',
       '写入后自动维护 log.md 与 index.md。',
     ].join('\n'),
     parameters: {

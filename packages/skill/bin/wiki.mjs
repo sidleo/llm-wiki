@@ -24,14 +24,20 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// 加载 core：优先本仓库 packages/core（开发态），回退已安装的 llm-wiki-core
+// 加载 core：优先同目录 wiki-core（自包含安装），回退本仓库 packages/core（开发态），再回退 npm
 async function loadCore() {
-  const devCore = join(__dirname, '..', '..', 'core', 'index.mjs')
+  const bundledCore = join(__dirname, 'wiki-core', 'index.mjs')
   try {
-    readFileSync(devCore)
-    return await import(devCore + '?t=' + Date.now())
+    readFileSync(bundledCore)
+    return await import(bundledCore + '?t=' + Date.now())
   } catch {
-    return await import('llm-wiki-core')
+    const devCore = join(__dirname, '..', '..', 'core', 'index.mjs')
+    try {
+      readFileSync(devCore)
+      return await import(devCore + '?t=' + Date.now())
+    } catch {
+      return await import('llm-wiki-core')
+    }
   }
 }
 
@@ -109,7 +115,7 @@ async function main() {
         limit: Number(arg(rest, '--limit', '20')),
       })
       if (!res.length) {
-        console.log('无匹配。提示：可 `wiki lint` 查看缺失概念清单，或 `wiki list` 看全貌。')
+        console.log('无匹配。若这是工作中遇到的真实表/知识：可 `wiki create` 主动补录（Table 自动记录；新口径先与用户确认）。或 `wiki list` 看全貌 / `wiki lint` 看缺失。')
         break
       }
       for (const r of res) console.log(fmtTitle(r))
@@ -119,7 +125,7 @@ async function main() {
       const id = positional(rest).join(' ') || arg(rest, '--id')
       if (!id) { console.error('usage: wiki get ID'); process.exit(1) }
       const got = await core.getConcept(dataDir, id)
-      if (!got) { console.error(`未找到: ${id}`); process.exit(1) }
+      if (!got) { console.error(`未找到: ${id}。若这是真实表/概念可用 wiki create 主动补录。`); process.exit(1) }
       if (got.ambiguous) { console.error(`标题「${id}」有多个候选: ${got.candidates.join(', ')}`); process.exit(1) }
       console.log(`# ${got.title}  (${got.id})`)
       console.log(`type: ${got.type} | status: ${got.meta.status || 'stable'}`)

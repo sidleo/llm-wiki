@@ -34,6 +34,7 @@ const WIKI_GUIDELINES = [
   "llm-wiki 知识库（OKF v0.2）：概念 = frontmatter(type 必填)+正文的 .md 文件，目录自由分层，真实链接交叉引用；index.md/log.md/AGENTS.md 是保留文件。",
   "做知识相关工作第一步先 wiki_list 看全貌（渐进披露），再 wiki_search / wiki_get 按需取明细。",
   "wiki_get 自动附 backlinks（引用它的概念/坑点）。写入前先 wiki_rules <目录> 看 AGENTS.md 门控。",
+  "【主动知识记录】工作中发现库中不存在的表 → 探查后 wiki_create(type: Table) 自动记录；SQL 踩坑 → wiki_create(type: Pitfall) 直接沉淀；与用户确认过的新口径 → 展示后 wiki_create(type: Metric/Attested Computation, confirmed:true)。",
   "frontmatter 只用 OKF 字段，不引入自定义字段；断链 = 未写入知识，lint 归集，不必修。",
 ].join("\n");
 

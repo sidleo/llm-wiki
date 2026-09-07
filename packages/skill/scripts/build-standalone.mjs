@@ -38,13 +38,8 @@ await mkdir(join(target, 'scripts', 'wiki-core', 'lib'), { recursive: true })
 const skillDoc = arg('--skill') || join(skillRoot, 'SKILL.md')
 await cp(skillDoc, join(target, 'SKILL.md'))
 
-// 2. CLI（加载 core 的相对路径需在目标形态下指向同目录 wiki-core）
-let cli = await readFile(join(skillRoot, 'bin', 'wiki.mjs'), 'utf8')
-cli = cli.replace(
-  /const devCore = join\(__dirname, '\.\.', '\.\.', 'core', 'index\.mjs'\)/,
-  "const devCore = join(__dirname, 'wiki-core', 'index.mjs')",
-)
-await writeFile(join(target, 'scripts', 'wiki.mjs'), cli)
+// 2. CLI（源文件 loadCore 已支持三级回退：wiki-core → 仓库 core → npm；直接复制即可）
+await cp(join(skillRoot, 'bin', 'wiki.mjs'), join(target, 'scripts', 'wiki.mjs'))
 
 // 3. install.sh
 await cp(join(skillRoot, 'scripts-install.sh'), join(target, 'scripts', 'install.sh')).catch(async () => {

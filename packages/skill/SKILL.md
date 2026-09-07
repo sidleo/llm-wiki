@@ -59,7 +59,16 @@ metadata:
 | `wiki deprecate DIR` | 目录级批量标 `status: deprecated` |
 | `wiki rules DIR` | 查看该目录生效的 AGENTS.md 规则（含向上遍历结果） |
 
-## 5. 写入规范（门控与 trust）
+## 5. 主动知识记录（工作中自动沉淀，不等用户吩咐）
+
+做数据分析/SQL 工作时，遇到以下情况应主动写入知识库：
+
+- **用了库中不存在的表** → `wiki create PATH --type Table`（探查其结构后自动记录，无需确认）
+- **SQL 出错/踩坑** → `wiki create PATH --type Pitfall`（记录坑描述/错误示例/正确做法，自动沉淀）
+- **与用户确认过的新口径/新示例** → 向用户展示后 `wiki create --type Metric 或 Attested Computation --confirmed`（带 human verified）
+- **检索未命中**：`wiki search`/`wiki get` 未命中若确属缺失知识 → 建概念补录；任务收尾可 `wiki lint` 看断链/缺失清单
+
+## 6. 写入规范（门控与 trust）
 
 - **写前先 `wiki rules <目标目录>`**：看该目录 AGENTS.md 规则是否要求 human 确认。
 - 需确认的（如口径类）：先向用户确认，用户同意后加 `--confirmed`（并把 `WIKI_USER` 设为用户名），写入会带 `verified: [{by: human:<user>}]`。
@@ -67,14 +76,14 @@ metadata:
 - frontmatter 只用 OKF 字段：`type`(必填) / `title` / `description` / `tags` / `sources` / `generated` / `verified` / `status` / `stale_after`；Attested Computation 用 `runtime`/`parameters`/`computation`/`executor`/`attester`。**不引入自定义字段**。
 - 正文引用相关概念用 markdown 链接 `/path.md` 或 `[[wiki-link]]`；读到引用即代表关系。
 
-## 6. 数据与格式约定
+## 7. 数据与格式约定
 
 - bundle 结构：`index.md`/`log.md`/`AGENTS.md` 是保留文件（不作概念）；其余 `.md` 都是概念。
 - 概念 = YAML frontmatter（`type` 必填）+ markdown 正文；`# Schema` 放字段清单、`# Computation` 放口径 SQL、`# Gotchas` 放表级坑。
 - 过期：`stale_after`（绝对时刻）；停用：`status: deprecated`；零删除，可恢复。
 - 目录规则：AGENTS.md 向上遍历、子目录覆盖父目录——`wiki rules DIR` 可查生效结果。
 
-## 7. 坑与边界
+## 8. 坑与边界
 
 - skill 无「每轮自动注入」：本 skill 靠你主动按标准链路走（先 list / index 再按需 get），这是平台物理边界。
 - 断链不是错误：`[[未写概念]]` 代表尚未写入的知识，lint 归集提示，不必修。
