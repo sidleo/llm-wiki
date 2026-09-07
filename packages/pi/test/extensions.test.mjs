@@ -28,11 +28,15 @@ function mockPi() {
 describe("pi-wiki extension", () => {
   let tmpDir;
   let registered;
+  let prevRegEnv;
 
   before(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "pi-wiki-"));
     await cp(join(__dirname, "..", "..", "..", "examples", "demo-bundle"), tmpDir, { recursive: true });
     process.env.PI_WIKI_DATA_DIR = tmpDir;
+    // 隔离注册表：避免读到用户真实 ~/.agents/wiki-registry.json（可能已配 active 分支）
+    prevRegEnv = process.env.WIKI_REGISTRY_FILE;
+    process.env.WIKI_REGISTRY_FILE = join(tmpDir, "reg0.json");
 
     const extMod = await import(join(__dirname, "..", "extensions", "index.ts"));
     const mocked = mockPi();
@@ -42,6 +46,8 @@ describe("pi-wiki extension", () => {
 
   after(async () => {
     delete process.env.PI_WIKI_DATA_DIR;
+    if (prevRegEnv === undefined) delete process.env.WIKI_REGISTRY_FILE;
+    else process.env.WIKI_REGISTRY_FILE = prevRegEnv;
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -52,10 +58,10 @@ describe("pi-wiki extension", () => {
     return t.execute("id", params || {}, undefined, undefined, {});
   };
 
-  test("注册 10 个 wiki_* 工具", () => {
-    const expected = ["wiki_list", "wiki_search", "wiki_get", "wiki_create", "wiki_update", "wiki_validate", "wiki_lint", "wiki_ingest", "wiki_deprecate", "wiki_rules", "wiki_help"];
+  test("注册 13 个 wiki_* 工具", () => {
+    const expected = ["wiki_list", "wiki_search", "wiki_get", "wiki_create", "wiki_update", "wiki_validate", "wiki_lint", "wiki_ingest", "wiki_deprecate", "wiki_rules", "wiki_help", "wiki_dirs", "wiki_use"];
     for (const n of expected) assert.ok(registered.has(n), `缺少 ${n}`);
-    assert.equal(registered.size, 11);
+    assert.equal(registered.size, 13);
   });
 
   test("wiki_validate 合规", async () => {
@@ -125,5 +131,36 @@ describe("pi-wiki extension", () => {
     assert.match(r.text, /APPEND_SYSTEM_PROMPT/);
     const q = await run("wiki_help", {});
     assert.match(q.text, /quickstart|快速上手/);
+  });
+
+  test("wiki_dirs 列出分支（注册表 + default）", async () => {
+    const regFile = join(tmpDir, "reg.json");
+    const prev = process.env.WIKI_REGISTRY_FILE;
+    process.env.WIKI_REGISTRY_FILE = regFile;
+    try {
+      const { writeRegistry } = await import(join(__dirname, "..", "..", "..", "packages", "core", "index.mjs"));
+      await writeRegistry({ bundles: { demo: tmpDir }, active: "demo" });
+      const d = await run("wiki_dirs", {});
+      assert.match(d.text, /\[demo\]/);
+      assert.match(d.text, /全局默认/);
+    } finally {
+      if (prev === undefined) delete process.env.WIKI_REGISTRY_FILE;
+      else process.env.WIKI_REGISTRY_FILE = prev;
+    }
+  });
+
+  test("wiki_use global 持久化并生效", async () => {
+    const regFile = join(tmpDir, "reg2.json");
+    const prev = process.env.WIKI_REGISTRY_FILE;
+    process.env.WIKI_REGISTRY_FILE = regFile;
+    try {
+      const w = await run("wiki_use", { name: "default", global: true });
+      assert.match(w.text, /default/);
+      const l = await run("wiki_list", {});
+      assert.match(l.text, /tables\/orders/, "切换后仍能读 bundle");
+    } finally {
+      if (prev === undefined) delete process.env.WIKI_REGISTRY_FILE;
+      else process.env.WIKI_REGISTRY_FILE = prev;
+    }
   });
 });

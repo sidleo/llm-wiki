@@ -9,8 +9,7 @@
  * parseDoc/serializeDoc（格式工具，供上层自定义编辑）。
  */
 
-import { join, dirname, basename } from 'node:path'
-import { homedir } from 'node:os'
+import { dirname } from 'node:path'
 
 export { parseYaml, stringifyYaml } from './lib/yaml.mjs'
 export { splitFrontmatter, serializeDoc, extractLinks, normalizeLink, extractFootnoteIds } from './lib/doc.mjs'
@@ -24,10 +23,19 @@ export { renderIndexBody, writeDirIndex, updateIndex, appendLog } from './lib/in
 export { createConcept, updateConcept, deprecateDir, nowIso, checkId } from './lib/write.mjs'
 export { ingestSource } from './lib/ingest.mjs'
 
-/** 默认数据目录 ~/.agents/wiki（不硬编码绝对路径）。 */
-export function defaultDataDir() {
-  return join(homedir(), '.agents', 'wiki')
-}
+// 命名 bundle 注册表：默认数据目录 ~/.agents/wiki + 多目录注册/切换（跨三形态）
+export {
+  defaultDataDir,
+  registryFile,
+  readRegistry,
+  writeRegistry,
+  writeRegistryActive,
+  expandTilde,
+  effectiveBundles,
+  fallbackPath,
+  resolveBundleRoot,
+  listBundles,
+} from './lib/registry.mjs'
 
 /** 列出 bundle 树（目录 → 概念列表 + 该目录 rules 提示），供 wiki_list。 */
 export async function listBundle(root, { type, status } = {}) {

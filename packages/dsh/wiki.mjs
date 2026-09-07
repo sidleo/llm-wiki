@@ -3,11 +3,13 @@
  *
  * 复用 @sidleo3/llm-wiki-core（packages/core）的全部逻辑；本文件只做宿主适配：
  * - 描述层注入（system-prompt/assemble 瀑布，可选宿主优化）
- * - 注册 9 个 wiki_* 工具
+ * - 注册 11 个 wiki_* 工具
  * - 写入门控：读 AGENTS.md 规则后由 agent 交互确认（无代码强制弹窗）
  *
  * 数据目录默认 ~/.agents/wiki（os.homedir() 计算，可经 profile 补丁 config
- * dataDir 覆盖）。工具 schema 遵循宿主 DSL 形态。
+ * dataDir 覆盖）。多目录：config.dataDirs 声明命名 bundle（与注册表
+ * ~/.agents/wiki-registry.json 合并，同名 config 优先）；wiki_use 会话级切换
+ * （按对话 agent 隔离），global:true 持久化为全局默认。工具 schema 遵循宿主 DSL 形态。
  */
 
 import { readFile } from 'node:fs/promises'
@@ -83,23 +85,59 @@ function strErr(e) {
 }
 
 export function apply(ctx, config) {
-  const dataDir = String(config?.dataDir || DEFAULTS.dataDir)
   const sectionName = String(config?.sectionName || DEFAULTS.sectionName)
   const sectionOrder = Number.isFinite(config?.sectionOrder) ? config.sectionOrder : DEFAULTS.sectionOrder
   const maxSectionChars = Number.isFinite(config?.maxSectionChars) ? config.maxSectionChars : DEFAULTS.maxSectionChars
   const maxGetChars = Number.isFinite(config?.maxGetChars) ? config.maxGetChars : DEFAULTS.maxGetChars
   const cacheTtlMs = Number.isFinite(config?.cacheTtlMs) ? config.cacheTtlMs : DEFAULTS.cacheTtlMs
 
-  let cachedSection = null
-  let cachedAt = 0
+  // —— 会话级目录状态：按对话 agent 隔离；无 agent（重放等）走 plainActive ——
+  const sessionActive = new WeakMap() // agent → {name, path}（wiki_use 会话级切换）
+  const sectionCache = new WeakMap() // agent → {path, text, at}
+  let plainActive = null // agent 缺失时的会话态兜底
+  let plainSectionCache = null
+  let cachedGlobal = null // 全局默认（注册表 active 或 default）短缓存
+  let cachedGlobalAt = 0
 
-  async function buildSection() {
+  /** 全局默认 bundle（注册表 active 或 default），TTL 内复用。 */
+  async function globalActive() {
+    const now = Date.now()
+    if (cachedGlobal && now - cachedGlobalAt < cacheTtlMs) return cachedGlobal
     const c = await loadCore()
-    const tree = await c.listBundle(dataDir)
+    cachedGlobal = await c.resolveBundleRoot(config, {})
+    cachedGlobalAt = now
+    return cachedGlobal
+  }
+
+  /** 当前生效 bundle：会话级覆盖优先，否则全局默认。 */
+  async function resolveActive(agent) {
+    if (agent) {
+      const hit = sessionActive.get(agent)
+      if (hit) return hit
+    } else if (plainActive) {
+      return plainActive
+    }
+    return globalActive()
+  }
+
+  /** wiki_use 后清理该对话的会话态与描述层缓存（下轮 assemble 重建）。 */
+  function clearSession(agent) {
+    if (agent) {
+      sessionActive.delete(agent)
+      sectionCache.delete(agent)
+    } else {
+      plainActive = null
+      plainSectionCache = null
+    }
+  }
+
+  async function buildSection(dir) {
+    const c = await loadCore()
+    const tree = await c.listBundle(dir)
     const total = tree.reduce((n, t) => n + t.concepts.length, 0)
     const lines = [
       '## 通用知识库（llm-wiki · OKF v0.2）',
-      `> 数据源：${dataDir}。共 ${total} 个概念，目录自由分层（表/口径计算/坑点/指标…靠 type 区分），概念间用真实链接交叉引用。`,
+      `> 数据源：${dir}。共 ${total} 个概念，目录自由分层（表/口径计算/坑点/指标…靠 type 区分），概念间用真实链接交叉引用。`,
       '> 【硬要求】涉及知识检索/写入的第一步：先 `wiki_list` 看全貌（渐进披露），再决定下一步——不要凭印象直接搜或写。',
       '- 步骤1 wiki_list — 目录树 + 概念清单（type/title/id）',
       '- 步骤2 wiki_search — 关键词检索（匹配 frontmatter + 正文）',
@@ -107,12 +145,13 @@ export function apply(ctx, config) {
       '- wiki_create / wiki_update — 写入（门控读目录 AGENTS.md 规则，确认后带 human verified）',
       '- wiki_validate — OKF v0.2 合规校验；wiki_lint — 体检（断链/孤儿/过期/缺 index）',
       '- wiki_ingest — 登记外部源文件进 bundle；wiki_deprecate — 目录级批量停用（status: deprecated）',
-      '- wiki_help — 查机制文档（保留文件/怎么写 AGENTS.md/怎么写 APPEND_SYSTEM_PROMPT.md/frontmatter/门控）。想给某分类加行为规则 → 在该目录建 APPEND_SYSTEM_PROMPT.md（正文即追加的 system prompt）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节。详情 wiki help。',
+      '- wiki_dirs — 查看已配置的目录分支；wiki_use <name> [global:true] — 切换当前分支（会话级/持久化全局默认）',
+      '- wiki_help — 查机制文档（保留文件/怎么写 AGENTS.md/怎么写 APPEND_SYSTEM_PROMPT.md/frontmatter/门控/多目录）。想给某分类加行为规则 → 在该目录建 APPEND_SYSTEM_PROMPT.md（正文即追加的 system prompt）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节。详情 wiki help。',
     ]
     // 目录自定注入：各目录 APPEND_SYSTEM_PROMPT.md 内容（根 + 全部子目录）
     // 通用插件本身不含任何场景写死的提示词；各分类自己决定注入什么规则
     try {
-      const prompts = await c.collectInjectPrompts(dataDir)
+      const prompts = await c.collectInjectPrompts(dir)
       if (prompts.length) {
         lines.push('', '【知识库自定义规则】以下内容来自各目录 APPEND_SYSTEM_PROMPT.md（用户为该分类定义的 system prompt 追加）：', '')
         for (const p of prompts) {
@@ -134,18 +173,24 @@ export function apply(ctx, config) {
     return text
   }
 
-  async function getSectionText() {
+  async function getSectionText(dir, agent) {
     const now = Date.now()
-    if (cachedSection !== null && now - cachedAt < cacheTtlMs) return cachedSection
-    cachedSection = await buildSection()
-    cachedAt = Date.now()
-    return cachedSection
+    const key = agent || null
+    const hit = key ? sectionCache.get(key) : plainSectionCache
+    if (hit && hit.path === dir && now - hit.at < cacheTtlMs) return hit.text
+    const text = await buildSection(dir)
+    const entry = { path: dir, text, at: now }
+    if (key) sectionCache.set(key, entry)
+    else plainSectionCache = entry
+    return text
   }
 
   // —— 描述层注入（同步注册监听器；异步读盘包 try/catch；绝不在回调后调 section）——
-  ctx.on('system-prompt/assemble', async (assembly, _context, next) => {
+  ctx.on('system-prompt/assemble', async (assembly, assembleContext, next) => {
     try {
-      const text = await getSectionText()
+      const agent = (assembleContext && (assembleContext.agent || assembleContext.scope)) || null
+      const active = await resolveActive(agent)
+      const text = await getSectionText(active.path, agent)
       if (assembly && Array.isArray(assembly.sections)) {
         const existing = assembly.sections.findIndex((s) => s && s.name === sectionName)
         const section = { name: sectionName, text, order: sectionOrder }
@@ -178,9 +223,10 @@ export function apply(ctx, config) {
       },
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const tree = await c.listBundle(dataDir, { type: args.type, status: args.status })
         if (!tree.length) return { text: '（知识库为空或过滤后无概念）' }
         const lines = []
@@ -215,11 +261,12 @@ export function apply(ctx, config) {
       required: ['query'],
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const q = String(args.query || '').trim()
         if (!q) return { text: 'query 不能为空' }
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const graph = await c.buildGraph(dataDir)
         const res = c.searchGraph(graph, q, { type: args.type, tag: args.tag, limit: Number(args.limit) || 20 })
         if (!res.length) return { text: '无匹配。若你正在用的表/知识确实不在库中：这是主动记录信号——探查其结构后用 wiki_create 建概念（Table 自动记录无需确认；新口径展示给用户确认后建 Metric/Attested Computation）。也可 wiki_list 看全貌或 wiki_lint 看缺失清单。' }
@@ -239,9 +286,10 @@ export function apply(ctx, config) {
       required: ['id'],
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const got = await c.getConcept(dataDir, args.id)
         if (!got) return { text: `未找到: ${args.id}。若这是你工作中遇到的真实表/概念，可用 wiki_create 主动补录（探查事实自动记录）。或 wiki_list 看全貌。` }
         if (got.ambiguous) return { text: `标题「${args.id}」有多个候选: ${got.candidates.join(', ')}。请用完整 id。` }
@@ -288,9 +336,10 @@ export function apply(ctx, config) {
       required: ['path', 'type'],
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const dir = dirname(args.path).replace(/\\/g, '/') === '.' ? '' : dirname(args.path).replace(/\\/g, '/')
         // 门控：完全由目标目录链 AGENTS.md 的「## 门控」声明决定（子目录覆盖父目录；
         // 链上无声明则默认全部自动记录——通用库不做任何 type 硬编码假设）
@@ -310,7 +359,7 @@ export function apply(ctx, config) {
             confirmed: args.confirmed === true,
             user: args.user || 'human:unknown',
             producer: 'dsh-wiki',
-            version: '0.1.0',
+            version: '0.2.0',
           },
         })
         return { text: `已创建 ${created.id}` }
@@ -334,14 +383,15 @@ export function apply(ctx, config) {
       required: ['id'],
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const patch = {
           title: args.title, description: args.description, body: args.body,
           type: args.type, status: args.status,
           tags: args.tags ? args.tags.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
-          opts: { confirmed: args.confirmed === true, user: args.user || 'human:unknown', producer: 'dsh-wiki', version: '0.1.0' },
+          opts: { confirmed: args.confirmed === true, user: args.user || 'human:unknown', producer: 'dsh-wiki', version: '0.2.0' },
         }
         await c.updateConcept(dataDir, args.id, patch)
         return { text: `已更新 ${args.id}` }
@@ -355,9 +405,10 @@ export function apply(ctx, config) {
     description: '校验知识库是否 OKF v0.2 合规（每个非保留 .md 有 frontmatter + 非空 type；保留文件结构）。缺可选字段/断链不判失败。',
     parameters: { type: 'object', properties: {} },
     output: out,
-    async execute() {
+    async execute(_args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const v = await c.validateBundle(dataDir)
         const lines = [v.ok ? 'OKF v0.2 合规 ✓' : '不合规：']
         for (const e of v.errors) lines.push('ERROR ' + e)
@@ -373,9 +424,10 @@ export function apply(ctx, config) {
     description: '知识库体检：断链（提及但无目标，=未写入知识）、孤儿页、过期（stale_after）、缺 index、缺 description、重复标题。',
     parameters: { type: 'object', properties: {} },
     output: out,
-    async execute() {
+    async execute(_args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const l = await c.lintBundle(dataDir)
         const lines = l.issues.length ? l.issues.map((i) => `${i.sev === 'warn' ? 'WARN' : 'info'} [${i.kind}] ${i.msg}`) : ['lint clean ✓']
         lines.push(`\nsummary: ${JSON.stringify(l.summary)}`)
@@ -397,10 +449,11 @@ export function apply(ctx, config) {
       required: ['source'],
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const c = await loadCore()
-        const r = await c.ingestSource(dataDir, { source: args.source, refDir: args.ref_dir }, { producer: 'dsh-wiki', version: '0.1.0' })
+        const dataDir = (await resolveActive(exec && exec.agent)).path
+        const r = await c.ingestSource(dataDir, { source: args.source, refDir: args.ref_dir }, { producer: 'dsh-wiki', version: '0.2.0' })
         return { text: `ingested → ${r.refPath}${r.existed ? ' (existed)' : ''}; 来源概念 ${r.sourceConceptId}` }
       } catch (e) { return strErr(e) }
     },
@@ -415,9 +468,10 @@ export function apply(ctx, config) {
       properties: { path: { type: 'string', description: '目录（bundle 相对，如 tables；空=全库）' } },
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const r = await c.deprecateDir(dataDir, String(args.path || ''))
         return { text: `已停用 ${r.deprecated}/${r.total} 个概念` }
       } catch (e) { return strErr(e) }
@@ -433,12 +487,84 @@ export function apply(ctx, config) {
       properties: { path: { type: 'string', description: '目录（bundle 相对，空=根）' } },
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         const rules = await c.resolveRules(dataDir, String(args.path || ''))
         if (!rules.length) return { text: '（无 AGENTS.md 规则）' }
         return { text: rules.map((r) => `===== ${r.path} =====\n${r.content.trimEnd()}`).join('\n\n').slice(0, maxGetChars) }
+      } catch (e) { return strErr(e) }
+    },
+  })
+
+  // —— wiki_dirs ——
+  ctx.tools.register({
+    name: 'wiki_dirs',
+    description: [
+      '查看全部 wiki 目录分支（命名 bundle）与当前激活项。',
+      'bundle 来源：注册表 ~/.agents/wiki-registry.json ∪ 插件配置 dataDirs（同名配置优先）；隐式 default = dataDir 兜底。',
+      '注册新目录：编辑注册表或插件配置 dataDirs；切换用 wiki_use。详见 wiki_help bundle。',
+    ].join('\n'),
+    parameters: { type: 'object', properties: {} },
+    output: out,
+    async execute(_args, exec) {
+      try {
+        const c = await loadCore()
+        const agent = exec && exec.agent
+        const rows = await c.listBundles(config)
+        const session = agent ? sessionActive.get(agent) : plainActive
+        const active = session || (await globalActive())
+        const lines = rows.map((r) => {
+          const markers = []
+          if (r.active) markers.push('全局默认')
+          if (session && session.name === r.name) markers.push('当前会话')
+          const m = markers.length ? `  ← ${markers.join(' / ')}` : ''
+          return `[${r.name}] ${r.path}${m}`
+        })
+        lines.push('', `当前生效目录：${active.path}`)
+        lines.push('', '切换：wiki_use <name> [global:true]；注册新目录：~/.agents/wiki-registry.json 或插件配置 dataDirs（详见 wiki_help bundle）。')
+        return { text: lines.join('\n').slice(0, maxGetChars) }
+      } catch (e) { return strErr(e) }
+    },
+  })
+
+  // —— wiki_use ——
+  ctx.tools.register({
+    name: 'wiki_use',
+    description: [
+      '切换当前 wiki 目录分支。name = bundle 名（wiki_dirs 查看）或 default。',
+      '默认会话级：仅当前对话生效（DSH 按对话隔离，不影响其他会话）。',
+      'global: true 同时持久化为全局默认（写注册表 active，影响新会话与 CLI/pi）。',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'bundle 名（wiki_dirs 查看）或 default' },
+        global: { type: 'boolean', description: 'true=同时持久化为全局默认（写 ~/.agents/wiki-registry.json 的 active）' },
+      },
+      required: ['name'],
+    },
+    output: out,
+    async execute(args, exec) {
+      try {
+        const c = await loadCore()
+        const agent = exec && exec.agent
+        const resolved = await c.resolveBundleRoot(config, { name: String(args.name) })
+        if (args.global === true) {
+          await c.writeRegistryActive(resolved.name)
+          cachedGlobal = null // 全局缓存失效：其他会话下次解析读到新默认
+        }
+        if (agent) {
+          sessionActive.set(agent, resolved)
+          sectionCache.delete(agent)
+        } else {
+          plainActive = resolved
+          plainSectionCache = null
+        }
+        const lines = [`已切换到 ${resolved.name} → ${resolved.path}`]
+        lines.push(args.global === true ? '（已持久化为全局默认，新会话与 CLI/pi 生效）' : '（会话级，仅当前对话生效）')
+        return { text: lines.join('\n') }
       } catch (e) { return strErr(e) }
     },
   })
@@ -452,9 +578,10 @@ export function apply(ctx, config) {
       properties: { topic: { type: 'string', description: '主题：quickstart | files | agents | append | frontmatter | gate（缺省 quickstart）' } },
     },
     output: out,
-    async execute(args) {
+    async execute(args, exec) {
       try {
         const c = await loadCore()
+        const dataDir = (await resolveActive(exec && exec.agent)).path
         return { text: c.getHelp(args.topic).slice(0, maxGetChars) }
       } catch (e) { return strErr(e) }
     },

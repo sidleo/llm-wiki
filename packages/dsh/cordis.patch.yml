@@ -14,6 +14,13 @@
 #       sectionName: wiki-registry
 #       sectionOrder: 62
 #       maxSectionChars: 6000
+# 多目录（命名 bundle）：config.dataDirs 声明，与注册表 ~/.agents/wiki-registry.json 合并
+# （同名配置优先）；wiki_dirs 查看，wiki_use <name> [global:true] 切换（会话级/持久化全局默认）。
+# 详见 wiki_help bundle。
+#   config:
+#     dataDirs:
+#       工作: /abs/path/to/bundle-a
+#       个人: ~/notes/wiki
 - insert:
     - id: wiki-registry
       name: '@sidleo3/dsh-wiki'

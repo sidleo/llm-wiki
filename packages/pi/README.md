@@ -6,7 +6,7 @@ OKF v0.2 bundle（默认 `~/.agents/wiki`），一套数据三处共享、无重
 
 ## 能力
 
-Pi 会话注入 11 个工具 + prompt 引导：
+Pi 会话注入 13 个工具 + prompt 引导：
 
 | 工具 | 用途 |
 |------|------|
@@ -21,6 +21,8 @@ Pi 会话注入 11 个工具 + prompt 引导：
 | `wiki_deprecate` | 目录级批量停用（status: deprecated，零删除） |
 | `wiki_rules` | 查看目录生效的 AGENTS.md 规则（向上遍历取最近） |
 | `wiki_help` | 机制文档自助查（AGENTS/APPEND 写法、frontmatter、门控） |
+| `wiki_dirs` | 查看全部 wiki 目录分支（命名 bundle）与当前激活项 |
+| `wiki_use` | 切换全局默认目录分支（写注册表 active；pi 无会话态） |
 
 ## 安装
 
@@ -35,6 +37,7 @@ pi install npm:@sidleo3/pi-wiki
 ## 配置
 
 - 数据目录默认 `~/.agents/wiki`（与 DSH 插件同一份 bundle），环境变量 `PI_WIKI_DATA_DIR` 覆盖。
+- 多目录（命名 bundle）：注册表 `~/.agents/wiki-registry.json`（env `WIKI_REGISTRY_FILE` 覆盖）；`wiki_dirs` 查看、`wiki_use <name> [global:true]` 切换全局默认（pi 无 DSH 的 per-agent 会话态）。
 - 自包含：core 已内嵌为 `vendor-core/`（`npm run sync-vendor` 从仓库 `packages/core` 同步），安装即用无需额外依赖。
 
 ## 知识库格式

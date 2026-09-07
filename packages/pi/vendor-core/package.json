@@ -1,7 +1,7 @@
 {
-  "name": "llm-wiki-core-vendor",
-  "version": "0.1.0",
-  "description": "llm-wiki-core vendored into pi-wiki (auto-generated; do not edit)",
+  "name": "@sidleo3/llm-wiki-core-vendor",
+  "version": "0.2.0",
+  "description": "@sidleo3/llm-wiki-core vendored into @sidleo3/pi-wiki (auto-generated; do not edit)",
   "type": "module",
   "main": "index.mjs"
 }

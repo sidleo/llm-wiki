@@ -42,8 +42,7 @@ node packages/skill/bin/wiki.mjs list
 
 - 默认 `~/.agents/wiki`
 - 覆盖：`WIKI_DATA_DIR` 环境变量，或每条命令 `--dataDir DIR`
-- 首次使用可用 `examples/demo-bundle` 当参考；真实知识按
-  `scripts/migrate.mjs` 从旧 kb/sqlkb 迁移，或直接 `wiki create` 建概念。
+- 首次使用可用 `examples/demo-bundle` 当参考；真实知识直接用 `wiki create` 建概念。
 
 ## 4. 宿主加载与授权
 

@@ -19,11 +19,14 @@ dsh plugin --profile web add link:/path/to/packages/dsh
 ## 能力
 
 - **描述层注入**（可选宿主优化）：每轮 system prompt 注入精简 section——bundle 路径 +
-  目录树摘要 + 工具用法 + 【硬要求】第一步先 `wiki_list`。与 dsh-kb 同机制
+  目录树摘要 + 工具用法 + 【硬要求】第一步先 `wiki_list`
   （`system-prompt/assemble` 瀑布，apply 同步注册，异步读盘不外抛）。
-- **11 个工具**：`wiki_list` / `wiki_search` / `wiki_get`（附 backlinks）/ `wiki_create` /
+- **13 个工具**：`wiki_list` / `wiki_search` / `wiki_get`（附 backlinks）/ `wiki_create` /
   `wiki_update` / `wiki_validate` / `wiki_lint` / `wiki_ingest` / `wiki_deprecate` /
-  `wiki_rules` / `wiki_help`（机制文档自助查）。
+  `wiki_rules` / `wiki_help`（机制文档自助查）/ `wiki_dirs` / `wiki_use`。
+- **多目录（命名 bundle）**：注册多个 wiki 目录并切换。`wiki_dirs` 查看分支；
+  `wiki_use <name>` 会话级切换（按对话隔离，仅当前对话生效），`global: true`
+  持久化为全局默认（写注册表 `~/.agents/wiki-registry.json`，新会话与 CLI/pi 生效）。
 - **门控**：写入前读目标目录 AGENTS.md 规则（`wiki_rules`），需 human 确认的类型经
   agent 交互确认后带 `verified`（无代码强制弹窗；格式仍是纯 OKF）。
 
@@ -41,6 +44,23 @@ dsh plugin --profile web add link:/path/to/packages/dsh
     maxSectionChars: 6000
     maxGetChars: 40000
     cacheTtlMs: 30000
+```
+
+多目录：`config.dataDirs` 声明命名 bundle（与注册表 `~/.agents/wiki-registry.json`
+合并，同名配置优先）：
+
+```yaml
+  config:
+    dataDirs:
+      工作: /absolute/path/to/bundle-a
+      个人: ~/notes/wiki
+```
+
+切换：`wiki_use <name> [global:true]`（会话级/持久化全局默认），`wiki_dirs` 查看。
+也可以直接编辑注册表 `~/.agents/wiki-registry.json`：
+
+```json
+{ "bundles": { "工作": "/abs/path/a", "个人": "~/notes/wiki" }, "active": "工作" }
 ```
 
 ## 开发与测试

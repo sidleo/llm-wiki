@@ -25,12 +25,18 @@ function runCli(args, env = {}) {
 
 describe("three forms consistency", () => {
   let tmpDir;
+  let prevRegEnv;
 
   before(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "wiki-3form-"));
     await cp(join(ROOT, "examples", "demo-bundle"), tmpDir, { recursive: true });
+    // 隔离注册表：避免读到用户真实 ~/.agents/wiki-registry.json（可能已配 active 分支）
+    prevRegEnv = process.env.WIKI_REGISTRY_FILE;
+    process.env.WIKI_REGISTRY_FILE = join(tmpDir, "3form-reg.json");
   });
   after(async () => {
+    if (prevRegEnv === undefined) delete process.env.WIKI_REGISTRY_FILE;
+    else process.env.WIKI_REGISTRY_FILE = prevRegEnv;
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -71,6 +77,27 @@ describe("three forms consistency", () => {
     assert.match(v, /compliant|合规/);
     const file = await readFile(join(tmpDir, "tables", "three_probe.md"), "utf8");
     assert.match(file, /type: Table/);
-    assert.match(file, /generated: \{ by: "agent:wiki-cli\/0\.1\.0"/);
+    assert.match(file, /generated: \{ by: "agent:wiki-cli\/0\.2\.0"/);
+  });
+
+  test("注册表 active 跨 CLI 与 dsh 一致", async () => {
+    const { writeRegistry } = await import(join(ROOT, "packages", "core", "index.mjs"));
+    await writeRegistry({ bundles: { probe: tmpDir }, active: "probe" });
+    // CLI 缺省（无 --dataDir/--wiki）跟随注册表 active（before 已隔离注册表）
+    const out = runCli(["get", "tables/three_probe"]);
+    assert.match(out, /Three Probe/);
+    // dsh mock 无 config.dataDir 时同样跟随注册表
+    const dshMod = await import(join(__dirname, "..", "packages", "dsh", "wiki.mjs"));
+    const tools = new Map();
+    const handlers = [];
+    const ctx = {
+      on(evt, fn) { if (evt === "system-prompt/assemble") handlers.push(fn); },
+      tools: { register(t) { tools.set(t.name, t); } },
+    };
+    dshMod.apply(ctx, {});
+    const got = await tools.get("wiki_get").execute({ id: "tables/three_probe" });
+    assert.match(got.text, /Three Probe/);
+    const use = await tools.get("wiki_use").execute({ name: "probe", global: true }, { agent: {} });
+    assert.match(use.text, /已切换到 probe/);
   });
 });

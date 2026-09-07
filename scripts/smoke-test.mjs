@@ -2,15 +2,15 @@
  * smoke-test.mjs —— 无宿主运行时的端到端冒烟测试。
  *
  * 覆盖 9 工具（list/search/get/create/update/validate/lint/ingest/deprecate）
- * + AGENTS.md 规则解析 + migrate 输出合规性。全部用合成数据（examples/demo-bundle
- * 与 tests/fixtures），绝不触碰真实 ~/.agents 数据。
+ * + AGENTS.md 规则解析 + 命名 bundle 注册表 + migrate 输出合规性。全部用合成数据
+ * （examples/demo-bundle 与 tests/fixtures），绝不触碰真实 ~/.agents 数据。
  *
  * 用法：
  *   node scripts/smoke-test.mjs
  */
 
 import { mkdtemp, rm, cp, readFile, readdir } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -141,6 +141,41 @@ async function main() {
   check('migrate 进程成功', r.status === 0, r.stderr)
   const vm = await core.validateBundle(migOut)
   check('migrate 输出 OKF 合规', vm.ok, vm.errors.join('; '))
+
+  // ── 命名 bundle 注册表（临时注册表文件，不触碰真实 ~/.agents）──
+  console.log('\n[bundle registry]')
+  const regFile = join(tmp, 'reg.json')
+  const prevReg = process.env.WIKI_REGISTRY_FILE
+  process.env.WIKI_REGISTRY_FILE = regFile
+  const b1 = join(tmp, 'bundle-a')
+  const b2 = join(tmp, 'bundle-b')
+  await cp(demo, b1, { recursive: true })
+  await cp(demo, b2, { recursive: true })
+  try {
+    let rb = await core.resolveBundleRoot({})
+    check('空注册表解析到 default', rb.name === 'default', JSON.stringify(rb))
+    await core.writeRegistry({ bundles: { alpha: b1, beta: b2 }, active: 'alpha' })
+    rb = await core.resolveBundleRoot({})
+    check('注册表 active 生效', rb.name === 'alpha' && rb.path === b1, JSON.stringify(rb))
+    const named = await core.resolveBundleRoot({}, { name: 'beta' })
+    check('显式 name 解析', named.name === 'beta' && named.path === b2, JSON.stringify(named))
+    let threw = false
+    try { await core.resolveBundleRoot({}, { name: 'nope' }) } catch { threw = true }
+    check('未知 name 抛错', threw)
+    const cfgOverride = await core.resolveBundleRoot({ dataDirs: { alpha: b2 } }, { name: 'alpha' })
+    check('config.dataDirs 同名覆盖注册表', cfgOverride.path === b2, cfgOverride.path)
+    const cfgDir = await core.resolveBundleRoot({ dataDir: b1 })
+    check('config.dataDir 兜底 default', cfgDir.path === b1, cfgDir.path)
+    await core.writeRegistryActive('beta')
+    const list = await core.listBundles({})
+    check('listBundles 含 beta+default', list.some((x) => x.name === 'beta' && x.active) && list.some((x) => x.name === 'default'))
+    check('listBundles alpha 不再 active', list.some((x) => x.name === 'alpha' && !x.active))
+    const tilde = await core.expandTilde('~/x')
+    check('~ 展开', tilde === join(homedir(), 'x'), tilde)
+  } finally {
+    if (prevReg === undefined) delete process.env.WIKI_REGISTRY_FILE
+    else process.env.WIKI_REGISTRY_FILE = prevReg
+  }
 
   await rm(tmp, { recursive: true, force: true })
   await rm(migOut, { recursive: true, force: true })

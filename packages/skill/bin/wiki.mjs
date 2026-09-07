@@ -13,8 +13,12 @@
  *   wiki ingest SOURCE [--dataDir DIR] [--ref-dir DIR]
  *   wiki deprecate DIR [--dataDir DIR]
  *   wiki rules DIR [--dataDir DIR]
+ *   wiki dirs [--dataDir DIR]
+ *   wiki use NAME [--global] [--dataDir DIR]
  *
  * 环境变量 WIKI_DATA_DIR 可覆盖默认数据目录 ~/.agents/wiki。
+ * 多目录（命名 bundle）：注册表 ~/.agents/wiki-registry.json（env WIKI_REGISTRY_FILE 覆盖）；
+ * --wiki NAME 指定分支（缺省用注册表 active 或 default）；wiki dirs 查看、wiki use 切换。
  */
 
 import { readFileSync } from 'node:fs'
@@ -46,6 +50,16 @@ function dataDirFromArgs(argv) {
   if (i >= 0 && argv[i + 1]) return argv[i + 1]
   if (process.env.WIKI_DATA_DIR) return process.env.WIKI_DATA_DIR
   return join(homedir(), '.agents', 'wiki')
+}
+
+/** 解析数据目录：--wiki NAME 指定命名 bundle；显式 --dataDir/WIKI_DATA_DIR 为路径覆盖；
+ *  两者都缺省时跟随注册表 active（或 default ~/.agents/wiki）。 */
+async function resolveDataDir(argv, core) {
+  const name = arg(argv, '--wiki')
+  const explicit = argv.includes('--dataDir') || !!process.env.WIKI_DATA_DIR
+  if (name) return core.resolveBundleRoot({ dataDir: dataDirFromArgs(argv) }, { name })
+  if (explicit) return { name: 'default', path: dataDirFromArgs(argv) }
+  return core.resolveBundleRoot({}, {})
 }
 
 function arg(argv, name, def) {
@@ -90,7 +104,7 @@ async function main() {
   const args = process.argv.slice(2)
   const cmd = args[0]
   const rest = args.slice(1)
-  const dataDir = dataDirFromArgs(args)
+  const { path: dataDir } = await resolveDataDir(args, core)
 
   const fmtTitle = (c) => `${c.strong ? '★' : ''}${c.type}: ${c.title}  (${c.id})\n    ${c.description || ''}`
 
@@ -157,7 +171,7 @@ async function main() {
         tags: arg(rest, '--tags') ? arg(rest, '--tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined,
         status: arg(rest, '--status'),
         body: bodyFrom(arg(rest, '--body') || ''),
-        opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: '0.1.0' },
+        opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: '0.2.0' },
       })
       console.log(`created ${out.id}`)
       break
@@ -165,7 +179,7 @@ async function main() {
     case 'update': {
       const id = positional(rest).join(' ') || arg(rest, '--id')
       if (!id) { console.error('usage: wiki update ID [--title T] …'); process.exit(1) }
-      const patch = { opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: '0.1.0' } }
+      const patch = { opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: '0.2.0' } }
       const t = arg(rest, '--title'); if (t !== undefined) patch.title = t
       const d = arg(rest, '--description'); if (d !== undefined) patch.description = d
       const s = arg(rest, '--status'); if (s !== undefined) patch.status = s
@@ -193,7 +207,7 @@ async function main() {
     case 'ingest': {
       const src = positional(rest).join(' ')
       if (!src) { console.error('usage: wiki ingest SOURCE'); process.exit(1) }
-      const out = await core.ingestSource(dataDir, { source: src, refDir: arg(rest, '--ref-dir') }, { producer: 'wiki-cli', version: '0.1.0' })
+      const out = await core.ingestSource(dataDir, { source: src, refDir: arg(rest, '--ref-dir') }, { producer: 'wiki-cli', version: '0.2.0' })
       console.log(`ingested → ${out.refPath}${out.existed ? ' (existed)' : ''}`)
       break
     }
@@ -218,6 +232,25 @@ async function main() {
       console.log(`index updated for ${dir || '(root)'}`)
       break
     }
+    case 'dirs': {
+      const rows = await core.listBundles({ dataDir: dataDirFromArgs(args) })
+      for (const r of rows) console.log(`${r.active ? '*' : ' '} [${r.name}] ${r.path}${r.active ? '  ← 全局默认' : ''}`)
+      console.log(`\n当前生效目录：${dataDir}`)
+      console.log('\n切换：wiki use <name> [--global]；注册新目录：编辑 ~/.agents/wiki-registry.json（详见 wiki help bundle）')
+      break
+    }
+    case 'use': {
+      const name = positional(rest).join(' ') || arg(rest, '--name')
+      if (!name) { console.error('usage: wiki use NAME [--global]'); process.exit(1) }
+      const resolved = await core.resolveBundleRoot({ dataDir: dataDirFromArgs(args) }, { name })
+      if (has(rest, '--global')) {
+        await core.writeRegistryActive(resolved.name)
+        console.log(`[${resolved.name}] ${resolved.path}（已持久化为全局默认）`)
+      } else {
+        console.log(`[${resolved.name}] ${resolved.path}（校验通过；CLI 无会话态，加 --global 才持久化）`)
+      }
+      break
+    }
     case 'help': {
       const topic = positional(rest).join(' ') || arg(rest, '--topic')
       console.log(core.getHelp(topic))
@@ -225,8 +258,8 @@ async function main() {
     }
     default:
       console.log(`wiki CLI — llm-wiki core 工具
-用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|index|help> [args] [--dataDir DIR]
-主题: wiki help [quickstart|files|agents|append|frontmatter|gate]`)
+用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|index|dirs|use|help> [args] [--dataDir DIR] [--wiki NAME]
+主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle]`)
       process.exit(cmd ? 1 : 0)
   }
 }

@@ -6,7 +6,7 @@
  * 不依赖猜测。内容随本项目规范版本走（SPEC-EXTENSIONS.md 的执行摘要）。
  */
 
-export const HELP_TOPICS = ['quickstart', 'files', 'agents', 'append', 'frontmatter', 'gate']
+export const HELP_TOPICS = ['quickstart', 'files', 'agents', 'append', 'frontmatter', 'gate', 'bundle']
 
 function doc(title, body) {
   return `# ${title}\n\n${body.trim()}\n`
@@ -24,8 +24,9 @@ const SECTIONS = {
 3. wiki_get <id 或 title> —— 读单个概念完整正文（自动附 backlinks）
 4. wiki_validate / wiki_lint —— 合规校验 / 体检
 5. 写入：wiki_create / wiki_update；停用：wiki_deprecate；查规则：wiki_rules
+6. 多目录：wiki_dirs 查看分支，wiki_use <name> [global: true] 切换
 
-更多主题：wiki help files | agents | append | frontmatter | gate`,
+更多主题：wiki help files | agents | append | frontmatter | gate | bundle`,
   ),
 
   files: doc(
@@ -125,6 +126,27 @@ computation（计算文件路径，缺省用正文 # Computation 代码块）、
 3. 链上没有任何门控节 → 默认全部自动记录（不拦截）。
 
 子目录声明覆盖父目录。confirmed:true 调用带 human verified 落盘。`,
+  ),
+
+  bundle: doc(
+    'wiki 目录分支（多 bundle 注册与切换）',
+    `
+默认数据目录 ~/.agents/wiki；要管理多个 wiki 目录，用「命名 bundle」：
+
+注册（二选一，可并存、同名宿主配置优先）：
+- 注册表文件（跨三形态共用，默认 ~/.agents/wiki-registry.json，env WIKI_REGISTRY_FILE 覆盖）：
+    { "bundles": { "工作": "/abs/path/a", "个人": "~/notes/wiki" }, "active": "工作" }
+- DSH 插件配置声明式注册（与注册表合并）：
+    config: { dataDirs: { 工作: '/abs/path/a', 个人: '~/notes/wiki' } }
+- 隐式 default = config.dataDir || ~/.agents/wiki：未配置任何名字时的兜底。
+
+切换：
+- wiki_dirs —— 查看全部 bundle 与当前激活项
+- wiki_use <name> [global: true] —— 会话级切换（DSH 按对话隔离，仅当前对话生效）；
+  global: true 同时持久化为全局默认（写注册表 active，影响新会话与其他宿主）
+- CLI：wiki dirs 查看 / wiki use NAME [--global] 切换；每条命令可 --wiki NAME 指定
+
+解析顺序（无显式 name）：注册表 active（若为已知名字）→ default。`,
   ),
 }
 

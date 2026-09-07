@@ -2,7 +2,8 @@
  * tests/dsh-mock-test.mjs —— DSH 插件宿主无关验证（mock ctx）。
  *
  * 不依赖真实 dsh web 运行时：构造最小 ctx（on/工具注册表），
- * 验证 apply 注册 10 个工具、描述层 section 组装、关键工具可执行。
+ * 验证 apply 注册 13 个工具、描述层 section 组装、关键工具可执行、
+ * 多目录 wiki_dirs/wiki_use（会话级切换 + 全局持久）。
  */
 
 import { mkdtemp, rm, cp, readFile, writeFile } from 'node:fs/promises'
@@ -23,7 +24,12 @@ function check(name, cond, extra) {
 
 async function main() {
   const tmp = await mkdtemp(join(tmpdir(), 'dsh-wiki-'))
+  const tmp2 = await mkdtemp(join(tmpdir(), 'dsh-wiki2-'))
+  const regTmp = await mkdtemp(join(tmpdir(), 'dsh-wiki-reg-'))
   await cp(join(__dirname, '..', 'examples', 'demo-bundle'), tmp, { recursive: true })
+  await cp(join(__dirname, '..', 'examples', 'demo-bundle'), tmp2, { recursive: true })
+  const prevReg = process.env.WIKI_REGISTRY_FILE
+  process.env.WIKI_REGISTRY_FILE = join(regTmp, 'reg.json')
 
   // mock ctx
   const tools = new Map()
@@ -37,12 +43,12 @@ async function main() {
   }
 
   const assembly = { sections: [] }
-  plugin.apply(ctx, { dataDir: tmp })
+  plugin.apply(ctx, { dataDir: tmp, dataDirs: { demo: tmp, other: tmp2 } })
 
   check('插件名 wiki-registry', plugin.name === 'wiki-registry')
   check('依赖 systemPrompt/tools', plugin.inject.join(',') === 'systemPrompt,tools')
-  const expected = ['wiki_list', 'wiki_search', 'wiki_get', 'wiki_create', 'wiki_update', 'wiki_validate', 'wiki_lint', 'wiki_ingest', 'wiki_deprecate', 'wiki_rules', 'wiki_help']
-  check('注册 11 个工具', expected.every((n) => tools.has(n)) && tools.size === 11, `got ${tools.size}`)
+  const expected = ['wiki_list', 'wiki_search', 'wiki_get', 'wiki_create', 'wiki_update', 'wiki_validate', 'wiki_lint', 'wiki_ingest', 'wiki_deprecate', 'wiki_rules', 'wiki_help', 'wiki_dirs', 'wiki_use']
+  check('注册 13 个工具', expected.every((n) => tools.has(n)) && tools.size === 13, `got ${tools.size}`)
 
   // 描述层组装
   await handlers['system-prompt/assemble'](assembly, {}, async () => {})
@@ -87,7 +93,40 @@ async function main() {
   const helpUnknown = await tools.get('wiki_help').execute({ topic: 'nope' })
   check('wiki_help 未知主题回主题列表', /quickstart/.test(helpUnknown.text))
 
+  // ── 多目录：wiki_dirs / wiki_use（会话级隔离 + 全局持久）──
+  await writeFile(join(tmp2, 'marker.md'), '---\ntype: Reference\ntitle: marker\n---\n\nmarker body\n', 'utf8')
+  const agentA = {}
+  const agentB = {}
+  const dirs = await tools.get('wiki_dirs').execute({}, { agent: agentA })
+  check('wiki_dirs 列出两个 bundle', /\[demo\]/.test(dirs.text) && /\[other\]/.test(dirs.text), dirs.text.slice(0, 200))
+  check('wiki_dirs 标记全局默认', /全局默认/.test(dirs.text), dirs.text.slice(0, 200))
+  const use = await tools.get('wiki_use').execute({ name: 'other' }, { agent: agentA })
+  check('wiki_use 会话级切换', /已切换到 other/.test(use.text) && /会话级/.test(use.text), use.text)
+  const listA = await tools.get('wiki_list').execute({}, { agent: agentA })
+  check('会话切换后 list 指向 other', listA.text.includes('marker'), 'marker 未命中: ' + listA.text.slice(0, 200))
+  const listB = await tools.get('wiki_list').execute({}, { agent: agentB })
+  check('其他对话不受会话切换影响', !listB.text.includes('marker'), listB.text.slice(0, 200))
+  const dirsA = await tools.get('wiki_dirs').execute({}, { agent: agentA })
+  check('wiki_dirs 标记当前会话', /当前会话/.test(dirsA.text), dirsA.text.slice(0, 300))
+  // 描述层跟随会话切换：wiki_use 后 assemble（同一 agent）数据源指向 other
+  const assembly2 = { sections: [] }
+  await handlers['system-prompt/assemble'](assembly2, { agent: agentA }, async () => {})
+  const sec2 = assembly2.sections.find((s) => s.name === 'wiki-registry')
+  check('描述层跟随会话切换', sec2 && sec2.text.includes(tmp2), (sec2 && sec2.text.slice(0, 120)) || 'no section')
+  // 全局持久：无 agent 调用 + global:true → 写注册表；新 agent 默认跟随
+  const useGlobal = await tools.get('wiki_use').execute({ name: 'other', global: true }, { agent: agentB })
+  check('wiki_use 全局持久', /全局默认/.test(useGlobal.text), useGlobal.text)
+  const agentC = {}
+  const listC = await tools.get('wiki_list').execute({}, { agent: agentC })
+  check('新对话默认跟随注册表 active', listC.text.includes('marker'), listC.text.slice(0, 200))
+  const dirsAfter = await tools.get('wiki_dirs').execute({}, { agent: agentC })
+  check('wiki_dirs 全局默认移到 other', /\[other\].*全局默认/.test(dirsAfter.text.replace(/\n/g, ' ')), dirsAfter.text.slice(0, 300))
+
+  if (prevReg === undefined) delete process.env.WIKI_REGISTRY_FILE
+  else process.env.WIKI_REGISTRY_FILE = prevReg
   await rm(tmp, { recursive: true, force: true })
+  await rm(tmp2, { recursive: true, force: true })
+  await rm(regTmp, { recursive: true, force: true })
   console.log(`\n结果: ${passed} passed, ${failed} failed`)
   if (failed) { console.log('失败:', failures.join(' | ')); process.exit(1) }
 }

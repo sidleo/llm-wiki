@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 0.1.0
+version: 0.2.0
 description: >-
   llm-wiki 通用知识库（OKF v0.2 格式 + llm-wiki 运维范式）。读写同一份
   markdown knowledge bundle（表结构/口径计算/坑点/指标等概念，带 frontmatter
@@ -14,6 +14,7 @@ metadata:
   cliHelp: "wiki --help"
   bundle-format: "OKF v0.2 (https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)"
   data-dir-default: "~/.agents/wiki（可用 --dataDir 或 WIKI_DATA_DIR 覆盖）"
+  multi-bundle: "命名 bundle：注册表 ~/.agents/wiki-registry.json；wiki dirs 查看、wiki use NAME [--global] 切换、--wiki NAME 指定"
 ---
 
 # llm-wiki Skill
@@ -33,7 +34,8 @@ metadata:
 
 1. `wiki` CLI 已安装且可用（`metadata.requires.bins: ["wiki"]`）。安装：将 `packages/skill/bin/wiki.mjs` 软链/复制为 PATH 中的 `wiki`。
 2. 默认数据目录 `~/.agents/wiki`；其他路径用 `--dataDir DIR` 或 `WIKI_DATA_DIR`。
-3. 若目录不存在或为空，可用 demo bundle 参考结构：仓库 `examples/demo-bundle/`。
+3. 多目录：命名 bundle 注册在 `~/.agents/wiki-registry.json`（`{ "bundles": { "名字": "/path" }, "active": "名字" }`）；`wiki dirs` 查看分支、`wiki use NAME [--global]` 切换、命令加 `--wiki NAME` 指定。
+4. 若目录不存在或为空，可用 demo bundle 参考结构：仓库 `examples/demo-bundle/`。
 
 ## 3. 标准链路（渐进披露）
 

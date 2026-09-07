@@ -2,20 +2,20 @@
  * pi-wiki — Pi 扩展（llm-wiki 通用知识库，OKF v0.2）。
  *
  * 复用 @sidleo3/llm-wiki-core 的全部逻辑（与 DSH 插件 / skill CLI 同一实现），
- * 注册 11 个 wiki_* 工具 + prompt 引导。数据目录默认 ~/.agents/wiki，
- * 环境变量 PI_WIKI_DATA_DIR 覆盖。
+ * 注册 13 个 wiki_* 工具 + prompt 引导。数据目录默认 ~/.agents/wiki，
+ * 环境变量 PI_WIKI_DATA_DIR 覆盖；多目录用命名 bundle（注册表
+ * ~/.agents/wiki-registry.json，env WIKI_REGISTRY_FILE 覆盖），wiki_use 切换
+ * 全局默认（pi 无会话态，无 DSH 的 per-agent 会话级切换）。
  *
  * Pi 无 DSH 的 system-prompt section 瀑布：用每个工具的 promptSnippet +
  * promptGuidelines 注入静态引导（「第一步先 wiki_list」等硬要求）。
  */
 
 import * as path from "node:path";
-import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-const DEFAULT_DATA_DIR = path.join(os.homedir(), ".agents", "wiki");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
@@ -46,8 +46,15 @@ const listVal = (v: unknown): string[] =>
     ? []
     : String(v).split(/\s*,\s*/).filter(Boolean);
 
-function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): void {
+function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, injectSnapshot = ""): void {
   const guidelines = () => (injectSnapshot ? [WIKI_GUIDELINES + injectSnapshot] : [WIKI_GUIDELINES]);
+
+  /** 当前生效 bundle 根（全局默认：注册表 active 或 default；pi 无会话态）。 */
+  async function resolveDir(): Promise<string> {
+    const core = await loadCore();
+    const r = await core.resolveBundleRoot(config, {});
+    return r.path;
+  }
   // wiki_list
   pi.registerTool({
     name: "wiki_list",
@@ -63,6 +70,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute(_id, params) {
       try {
         const core = await loadCore();
+        const dataDir = await resolveDir();
         const tree = await core.listBundle(dataDir, { type: params.type, status: params.status });
         if (!tree.length) return ok("（知识库为空或过滤后无概念）");
         const lines: string[] = [];
@@ -99,6 +107,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
         const q = String(params.query || "").trim();
         if (!q) return ok("query 不能为空");
         const core = await loadCore();
+        const dataDir = await resolveDir();
         const graph = await core.buildGraph(dataDir);
         const res = core.searchGraph(graph, q, { type: params.type, tag: params.tag, limit: params.limit || 20 });
         if (!res.length) return ok("无匹配。若这是工作中遇到的真实表/知识：可用 wiki_create 主动补录（探查事实自动记录；新口径先与用户确认）。或 wiki_list 看全貌 / wiki_lint 看缺失。");
@@ -120,6 +129,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute(_id, params) {
       try {
         const core = await loadCore();
+        const dataDir = await resolveDir();
         const got = await core.getConcept(dataDir, params.id);
         if (!got) return ok(`未找到: ${params.id}。若这是真实表/概念可用 wiki_create 主动补录。或 wiki_list 看全貌。`);
         if (got.ambiguous) return ok(`标题「${params.id}」有多个候选: ${got.candidates.join(", ")}。请用完整 id。`);
@@ -164,6 +174,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute(_id, params) {
       try {
         const core = await loadCore();
+        const dataDir = await resolveDir();
         const dir = path.posix.dirname(params.path) === "." ? "" : path.posix.dirname(params.path);
         const gate = await core.gateForType(dataDir, dir, params.type);
         if (gate.needConfirm && !params.confirmed) {
@@ -179,7 +190,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
           body: params.body,
           tags: listVal(params.tags),
           status: params.status,
-          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.1.0" },
+          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.2.0" },
         });
         return ok(`已创建 ${created.id}`);
       } catch (e) {
@@ -209,6 +220,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute(_id, params) {
       try {
         const core = await loadCore();
+        const dataDir = await resolveDir();
         await core.updateConcept(dataDir, params.id, {
           title: params.title,
           description: params.description,
@@ -216,7 +228,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
           type: params.type,
           status: params.status,
           tags: params.tags !== undefined ? listVal(params.tags) : undefined,
-          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.1.0" },
+          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.2.0" },
         });
         return ok(`已更新 ${params.id}`);
       } catch (e) {
@@ -236,6 +248,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute() {
       try {
         const core = await loadCore();
+        const dataDir = await resolveDir();
         const v = await core.validateBundle(dataDir);
         const lines = [v.ok ? "OKF v0.2 合规 ✓" : "不合规："];
         for (const e of v.errors) lines.push("ERROR " + e);
@@ -258,6 +271,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute() {
       try {
         const core = await loadCore();
+        const dataDir = await resolveDir();
         const l = await core.lintBundle(dataDir);
         const lines = l.issues.length ? l.issues.map((i: any) => `${i.sev === "warn" ? "WARN" : "info"} [${i.kind}] ${i.msg}`) : ["lint clean ✓"];
         lines.push(`\nsummary: ${JSON.stringify(l.summary)}`);
@@ -282,7 +296,8 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute(_id, params) {
       try {
         const core = await loadCore();
-        const r = await core.ingestSource(dataDir, { source: params.source, refDir: params.ref_dir }, { producer: "@sidleo3/pi-wiki", version: "0.1.0" });
+        const dataDir = await resolveDir();
+        const r = await core.ingestSource(dataDir, { source: params.source, refDir: params.ref_dir }, { producer: "@sidleo3/pi-wiki", version: "0.2.0" });
         return ok(`ingested → ${r.refPath}${r.existed ? " (existed)" : ""}; 来源概念 ${r.sourceConceptId}`);
       } catch (e) {
         return err(e);
@@ -301,6 +316,7 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute(_id, params) {
       try {
         const core = await loadCore();
+        const dataDir = await resolveDir();
         const r = await core.deprecateDir(dataDir, String(params.path || ""));
         return ok(`已停用 ${r.deprecated}/${r.total} 个概念`);
       } catch (e) {
@@ -320,9 +336,59 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
     async execute(_id, params) {
       try {
         const core = await loadCore();
+        const dataDir = await resolveDir();
         const rules = await core.resolveRules(dataDir, String(params.path || ""));
         if (!rules.length) return ok("（无 AGENTS.md 规则）");
         return ok(rules.map((r: any) => `===== ${r.path} =====\n${r.content.trimEnd()}`).join("\n\n"));
+      } catch (e) {
+        return err(e);
+      }
+    },
+  });
+
+  // wiki_dirs
+  pi.registerTool({
+    name: "wiki_dirs",
+    label: "Wiki Dirs",
+    description:
+      "查看全部 wiki 目录分支（命名 bundle）与当前激活项。bundle 来源：注册表 ~/.agents/wiki-registry.json ∪ 插件配置 dataDirs（同名配置优先）；隐式 default 兜底。注册新目录：编辑注册表；切换用 wiki_use。详见 wiki_help bundle。",
+    promptSnippet: "知识库分支：查看已注册目录与当前激活项",
+    promptGuidelines: guidelines(),
+    parameters: Type.Object({}),
+    async execute() {
+      try {
+        const core = await loadCore();
+        const rows = await core.listBundles(config);
+        const active = await resolveDir();
+        const lines = rows.map((r: any) => `${r.active ? "*" : " "} [${r.name}] ${r.path}${r.active ? "  ← 全局默认" : ""}`);
+        lines.push(`\n当前生效目录：${active}`);
+        lines.push("\n切换：wiki_use <name> [global:true]；注册新目录：~/.agents/wiki-registry.json（详见 wiki_help bundle）。");
+        return ok(lines.join("\n"));
+      } catch (e) {
+        return err(e);
+      }
+    },
+  });
+
+  // wiki_use
+  pi.registerTool({
+    name: "wiki_use",
+    label: "Wiki Use",
+    description:
+      "切换当前 wiki 目录分支（全局默认，写注册表 ~/.agents/wiki-registry.json 的 active，影响后续所有工具调用与新会话）。pi 无会话态：不支持 DSH 的会话级切换；不带 global:true 时仅校验 name 并展示目标。",
+    promptSnippet: "知识库切换：改全局默认目录分支（写注册表 active）",
+    promptGuidelines: guidelines(),
+    parameters: Type.Object({
+      name: Type.String({ description: "bundle 名（wiki_dirs 查看）或 default" }),
+      global: Type.Optional(Type.Boolean({ description: "true=持久化为全局默认（写注册表 active）；缺省仅校验展示" })),
+    }),
+    async execute(_id, params) {
+      try {
+        const core = await loadCore();
+        const resolved = await core.resolveBundleRoot(config, { name: params.name });
+        if (params.global === true) await core.writeRegistryActive(resolved.name);
+        const scope = params.global === true ? "全局默认，后续工具调用与新会话生效" : "校验通过（pi 无会话态；需 global:true 才持久化）";
+        return ok(`[${resolved.name}] ${resolved.path}（${scope}）`);
       } catch (e) {
         return err(e);
       }
@@ -349,8 +415,9 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
 }
 
 /**
- * Pi 扩展默认导出：注册 11 个 wiki_* 工具。
- * 数据目录可用环境变量 PI_WIKI_DATA_DIR 覆盖（默认 ~/.agents/wiki）。
+ * Pi 扩展默认导出：注册 13 个 wiki_* 工具。
+ * 数据目录默认 ~/.agents/wiki，环境变量 PI_WIKI_DATA_DIR 覆盖；多目录用命名
+ * bundle（注册表 ~/.agents/wiki-registry.json），wiki_use 切换全局默认。
  *
  * 启动快照：加载时读一次各目录 APPEND_SYSTEM_PROMPT.md，把目录清单与正文
  * 并入 guidelines。做不到 DSH 的每轮更新（pi 无 system-prompt 瀑布钩子），
@@ -358,10 +425,11 @@ function registerTools(pi: ExtensionAPI, dataDir: string, injectSnapshot = ""): 
  * 若启动后 APPEND 文件变化，agent 可用 wiki_rules 按需重读。
  */
 export default async function (pi: ExtensionAPI, _ctx?: ExtensionContext): Promise<void> {
-  const dataDir = process.env.PI_WIKI_DATA_DIR || DEFAULT_DATA_DIR;
+  const config: Record<string, unknown> = { dataDir: process.env.PI_WIKI_DATA_DIR || undefined };
   let extra = "";
   try {
     const core = await loadCore();
+    const { path: dataDir } = await core.resolveBundleRoot(config, {});
     const prompts = await core.collectInjectPrompts(dataDir);
     if (prompts.length) {
       const parts = prompts.map((p: any) =>
@@ -374,5 +442,5 @@ export default async function (pi: ExtensionAPI, _ctx?: ExtensionContext): Promi
   } catch {
     // 读不到不影响工具注册（静默降级）
   }
-  registerTools(pi, dataDir, extra);
+  registerTools(pi, config, extra);
 }
