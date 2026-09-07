@@ -107,17 +107,27 @@ export function apply(ctx, config) {
       '- wiki_create / wiki_update — 写入（门控读目录 AGENTS.md 规则，确认后带 human verified）',
       '- wiki_validate — OKF v0.2 合规校验；wiki_lint — 体检（断链/孤儿/过期/缺 index）',
       '- wiki_ingest — 登记外部源文件进 bundle；wiki_deprecate — 目录级批量停用（status: deprecated）',
-      '【主动知识记录】工作中遇到以下情况，主动沉淀到知识库（不依赖用户特意吩咐）：',
-      '- 用了库中不存在的表 → 探查其结构后 `wiki_create`（type: Table）自动记录，无需确认',
-      '- SQL 出错/踩坑 → `wiki_create`（type: Pitfall）记录错误示例与正确做法，自动沉淀',
-      '- 与用户确认过的新口径/新示例 → 向用户展示后 `wiki_create`（type: Metric 或 Attested Computation，带 confirmed 写入 human verified）',
-      '- 检索未命中时：若确属缺失知识且事实已确认 → 建概念补录；任务收尾用 `wiki_lint` 看断链/缺失清单',
+    ]
+    // 目录自定注入：各目录 APPEND_SYSTEM_PROMPT.md 内容（根 + 全部子目录）
+    // 通用插件本身不含任何场景写死的提示词；各分类自己决定注入什么规则
+    try {
+      const prompts = await c.collectInjectPrompts(dataDir)
+      if (prompts.length) {
+        lines.push('', '【知识库自定义规则】以下内容来自各目录 APPEND_SYSTEM_PROMPT.md（用户为该分类定义的 system prompt 追加）：', '')
+        for (const p of prompts) {
+          lines.push(p.dir ? `### [${p.dir}]` : '### (bundle 根规则)', '', p.content, '')
+        }
+      }
+    } catch {
+      // 注入失败不影响描述层（静默降级）
+    }
+    lines.push(
       '',
       ...tree.map((t) => {
         const dep = t.concepts.filter((c) => c.status === 'deprecated').length
         return `- [${t.dir || '(root)'}] ${t.concepts.length} concepts${dep ? `（${dep} deprecated）` : ''}`
       }),
-    ]
+    )
     let text = lines.join('\n')
     if (text.length > maxSectionChars) text = text.slice(0, maxSectionChars) + '\n…（描述层超限截断）'
     return text
@@ -256,7 +266,7 @@ export function apply(ctx, config) {
     name: 'wiki_create',
     description: [
       '新增概念到 llm-wiki 知识库（纯 OKF frontmatter：type 必填 + title/description/tags/…）。',
-      '【主动记录】工作中发现库中没有的表/踩到的坑 → 主动用本工具沉淀：type: Table（探查事实）直接写无需确认；type: Pitfall（踩坑）直接写；type: Metric/Attested Computation（新口径/示例）先向用户展示征得同意后以 confirmed: true 调用（写入 human verified）。',
+      '写入门控：是否需要用户确认，完全由目标目录 AGENTS.md 的「## 门控」声明决定（该声明列出需 human 确认的 type；未声明则全部自动记录）。各分类可自行定义；confirmed: true 调用带 human verified。',
       '写入后自动维护 log.md 与 index.md。',
     ].join('\n'),
     parameters: {
@@ -280,14 +290,11 @@ export function apply(ctx, config) {
       try {
         const c = await loadCore()
         const dir = dirname(args.path).replace(/\\/g, '/') === '.' ? '' : dirname(args.path).replace(/\\/g, '/')
-        // 门控：读目录 AGENTS.md 规则，粗判是否需要 confirmed（规则含「需 human 确认」关键词且未 confirmed）
-        const rules = await c.resolveRules(dataDir, dir)
-        const ruleText = rules.map((r) => r.content).join('\n')
-        const gateTypes = ['Attested Computation', 'Metric', '口径']
-        const sensitive = /human\s*确认|human-confirm|confirmed|确认/i.test(ruleText)
-        const typeSensitive = gateTypes.some((t) => t === args.type)
-        if ((sensitive && typeSensitive) && !args.confirmed) {
-          return needConfirmed(`目录规则 ${rules.map((r) => r.path).join(', ')} 要求 ${args.type} 类写入需 human 确认`)
+        // 门控：完全由目标目录链 AGENTS.md 的「## 门控」声明决定（子目录覆盖父目录；
+        // 链上无声明则默认全部自动记录——通用库不做任何 type 硬编码假设）
+        const gate = await c.gateForType(dataDir, dir, args.type)
+        if (gate.needConfirm && !args.confirmed) {
+          return needConfirmed(gate.via ? `目录规则 ${gate.via} 要求 ${args.type} 类写入需 human 确认` : `${args.type} 类写入需 human 确认`)
         }
         const created = await c.createConcept(dataDir, {
           id: args.path,

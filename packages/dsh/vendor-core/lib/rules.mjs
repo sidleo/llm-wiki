@@ -60,3 +60,52 @@ export async function resolveRules(root, dir) {
   const rules = await readRules(root, dir)
   return rules.map((r) => ({ path: r.path, content: r.content }))
 }
+
+/**
+ * 解析某份 AGENTS.md 正文里的「## 门控」节声明。
+ *
+ * 约定格式（宽松解析，大小写/全半角不敏感）：
+ *   ## 门控
+ *   - 需 human 确认: Metric, Attested Computation
+ *   - 自动记录: Table, Pitfall
+ * 未出现「需 human 确认」行即表示该目录对所有 type 无要求（默认全部自动记录）。
+ *
+ * @returns {{ needConfirm: string[] } | null} 无门控节返回 null（调用方按默认处理）
+ */
+export function parseGateDecl(text) {
+  const lines = String(text || '').split('\n')
+  // 找 ## 门控 节（其后的行直到下一个 # 标题）
+  let inGate = false
+  let needConfirm = []
+  let found = false
+  for (const ln of lines) {
+    const t = ln.trim()
+    if (/^#{1,3}\s*门控/.test(t)) { inGate = true; found = true; continue }
+    if (inGate && /^#{1,3}\s/.test(t)) break // 下一节
+    if (!inGate) continue
+    // 匹配「需 human 确认: X, Y」类行；类型列表按逗号/顿号切分（type 名可含空格）
+    const m = t.match(/^[>*-]?\s*需\s*(human\s*)?确认\s*[:：]\s*(.+)$/i)
+    if (m) {
+      needConfirm = m[2].split(/[,，、]+/).map((s) => s.trim()).filter(Boolean)
+    }
+  }
+  if (!found) return null
+  return { needConfirm }
+}
+
+/**
+ * 判定某目录下某 type 是否需要 human 确认。
+ * 叠加语义：子目录声明覆盖父目录（取「最近含门控节的声明」；若链上无声明 → 默认自动记录）。
+ * @returns {Promise<{ needConfirm: boolean, via: string | null }>}
+ */
+export async function gateForType(root, dir, type) {
+  const rules = await readRules(root, dir)
+  // 从最近往根找第一个含门控节的声明
+  for (let i = rules.length - 1; i >= 0; i--) {
+    const decl = parseGateDecl(rules[i].content)
+    if (decl) {
+      return { needConfirm: decl.needConfirm.includes(type), via: rules[i].path }
+    }
+  }
+  return { needConfirm: false, via: null }
+}

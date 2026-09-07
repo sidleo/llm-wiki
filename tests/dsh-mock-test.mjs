@@ -5,7 +5,7 @@
  * 验证 apply 注册 10 个工具、描述层 section 组装、关键工具可执行。
  */
 
-import { mkdtemp, rm, cp, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, cp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -63,8 +63,13 @@ async function main() {
   const val = await tools.get('wiki_validate').execute({})
   check('wiki_validate 合规', val.text.includes('OKF v0.2 合规'))
 
-  // create 门控：Attested Computation 在根 AGENTS.md 声明需 human 确认 → 未 confirmed 被拦
-  const gate = await tools.get('wiki_create').execute({ path: 'computations/rev-x', type: 'Attested Computation', title: 'x', description: 'd' })
+  // 门控数据化：默认无声明时自动记录
+  const autoGate = await tools.get('wiki_create').execute({ path: 'computations/rev-x', type: 'Attested Computation', title: 'x', description: 'd' })
+  check('无门控声明时默认自动记录', /已创建/.test(autoGate.text), autoGate.text)
+
+  // 在 bundle 根写入带门控节的 AGENTS.md → 口径类未 confirmed 被拦
+  await writeFile(join(tmp, 'AGENTS.md'), '# 根规则\n\n## 门控\n\n- 需 human 确认: Metric, Attested Computation\n- 自动记录: Table, Pitfall\n', 'utf8')
+  const gate = await tools.get('wiki_create').execute({ path: 'computations/rev-y', type: 'Attested Computation', title: 'y', description: 'd' })
   check('口径类未确认被门控拦截', /需用户确认|human 确认/.test(gate.text), gate.text)
 
   const createOk = await tools.get('wiki_create').execute({

@@ -3,7 +3,7 @@
 > 本文是知识 bundle 的**格式规范唯一事实源**。格式层严格遵守
 > [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)，
 > 本文件只做落地约定说明，不新增任何 OKF 之外的自定义 frontmatter 字段。
-> 唯一的项目级扩展是 `AGENTS.md` 作为第三类保留文件，见 [SPEC-EXTENSIONS.md](SPEC-EXTENSIONS.md)。
+> 唯一的项目级扩展是 `AGENTS.md` 与 `APPEND_SYSTEM_PROMPT.md` 作为保留文件，见 [SPEC-EXTENSIONS.md](SPEC-EXTENSIONS.md)。
 
 ## 1. Bundle
 
@@ -14,8 +14,10 @@
 ├── index.md                   # 保留：目录索引（渐进披露入口）
 ├── log.md                     # 保留：时间线（ISO-8601 日期标题，最新在前）
 ├── AGENTS.md                  # 保留（本项目扩展）：bundle 级规则
+├── APPEND_SYSTEM_PROMPT.md      # 保留（本项目扩展）：bundle 级 system prompt 注入
 ├── <领域>/                    # 目录自由分层，路径即分组
 │   ├── AGENTS.md              # 可选：该目录规则（缺失时向上遍历）
+│   ├── APPEND_SYSTEM_PROMPT.md  # 可选：该目录自定义注入（描述层并入 system prompt）
 │   ├── index.md               # 可选：该目录索引
 │   └── <concept>.md           # 概念文档
 ```
@@ -27,6 +29,7 @@
 | `index.md` | 目录索引。无 frontmatter（bundle 根可带 `okf_version`）。正文=分组标题 + 链接列表 |
 | `log.md` | 变更历史。日期标题 `YYYY-MM-DD`，最新在前。条目形如 `* **Update**: …` |
 | `AGENTS.md` | **本项目扩展**：该目录（子树）的 agent 规则。无 frontmatter、不作 concept、不参与 OKF type 校验。见 SPEC-EXTENSIONS.md |
+| `APPEND_SYSTEM_PROMPT.md` | **本项目扩展**：该目录用户自定义的 system prompt 追加内容。无 frontmatter、不作 concept。描述层每轮并入。见 SPEC-EXTENSIONS.md |
 
 保留文件**不得**用作概念文档；其余所有 `.md` 都是 concept。
 
@@ -118,7 +121,7 @@ OKF v0.2 合规 = 全部满足：
 
 1. 每个非保留 `.md` 文件含可解析 YAML frontmatter
 2. 每个 frontmatter 含非空 `type`
-3. 保留文件符合既定结构（index/log/AGENTS.md）
+3. 保留文件符合既定结构（index/log/AGENTS.md/APPEND_SYSTEM_PROMPT.md）
 
 **不得**因以下原因拒绝 bundle（只 lint warn）：
 

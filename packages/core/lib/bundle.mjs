@@ -1,7 +1,8 @@
 /**
  * Bundle 扫描与链接图。
  *
- * bundle = 目录树。保留文件 index.md / log.md / AGENTS.md 不作 concept。
+ * bundle = 目录树。保留文件 index.md / log.md / AGENTS.md /
+ * APPEND_SYSTEM_PROMPT.md 不作 concept。
  * Concept ID = bundle 相对路径去掉 .md（如 tables/orders）。
  */
 
@@ -9,7 +10,8 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, dirname, basename } from 'node:path'
 import { splitFrontmatter, extractLinks } from './doc.mjs'
 
-export const RESERVED = new Set(['index.md', 'log.md', 'AGENTS.md', 'CLAUDE.md', 'CODEBUDDY.md'])
+/** 保留文件名（任意层级）：index.md / log.md / AGENTS.md / APPEND_SYSTEM_PROMPT.md (+ CLAUDE/CODEBUDDY 软链) */
+export const RESERVED = new Set(['index.md', 'log.md', 'AGENTS.md', 'CLAUDE.md', 'CODEBUDDY.md', 'APPEND_SYSTEM_PROMPT.md'])
 
 /** 是否为保留文件名（任意层级） */
 export function isReserved(name) {
@@ -102,3 +104,39 @@ export async function readOkfVersion(root) {
 }
 
 export { relative }
+
+/**
+ * 收集 bundle 的 APPEND_SYSTEM_PROMPT.md（根 + 全部子目录）。
+ * 每份正文原样返回；调用方（描述层）按目录层级组织并并入 system prompt。
+ * @returns {Promise<{dir:string, path:string, content:string}[]>} dir='' 为根
+ */
+export async function collectInjectPrompts(root) {
+  const out = []
+  async function walk(rel) {
+    let entries
+    try {
+      entries = await readdir(join(root, rel), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (e.name === 'APPEND_SYSTEM_PROMPT.md' && e.isFile()) {
+        try {
+          const text = await readFile(join(root, rel, e.name), 'utf8')
+          const trimmed = text.trim()
+          if (trimmed) out.push({ dir: rel, path: rel ? `${rel}/${e.name}` : e.name, content: trimmed })
+        } catch {
+          // 忽略竞态
+        }
+        continue
+      }
+      if (e.isDirectory() && !e.name.startsWith('.')) {
+        await walk(rel ? `${rel}/${e.name}` : e.name)
+      }
+    }
+  }
+  await walk('')
+  // 根在前；其余按目录名排序（确定性输出）
+  out.sort((a, b) => (a.dir === b.dir ? 0 : a.dir === '' ? -1 : b.dir === '' ? 1 : a.dir < b.dir ? -1 : 1))
+  return out
+}

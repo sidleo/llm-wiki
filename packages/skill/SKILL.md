@@ -59,14 +59,18 @@ metadata:
 | `wiki deprecate DIR` | 目录级批量标 `status: deprecated` |
 | `wiki rules DIR` | 查看该目录生效的 AGENTS.md 规则（含向上遍历结果） |
 
-## 5. 主动知识记录（工作中自动沉淀，不等用户吩咐）
+## 5. 主动知识记录（分类自定义规则驱动）
 
-做数据分析/SQL 工作时，遇到以下情况应主动写入知识库：
+本 skill 本身不写死任何场景的「主动记录」规则。行为由各分类目录的
+`APPEND_SYSTEM_PROMPT.md`（system prompt 注入文件）决定：
 
-- **用了库中不存在的表** → `wiki create PATH --type Table`（探查其结构后自动记录，无需确认）
-- **SQL 出错/踩坑** → `wiki create PATH --type Pitfall`（记录坑描述/错误示例/正确做法，自动沉淀）
-- **与用户确认过的新口径/新示例** → 向用户展示后 `wiki create --type Metric 或 Attested Computation --confirmed`（带 human verified）
-- **检索未命中**：`wiki search`/`wiki get` 未命中若确属缺失知识 → 建概念补录；任务收尾可 `wiki lint` 看断链/缺失清单
+- 做某分类相关工作前，若该目录（或其祖先）有 `APPEND_SYSTEM_PROMPT.md`，
+  其正文即该分类的追加行为规则——**照做**（例：sql 目录要求「用了库中
+  不存在的表 → 自动建 Table；踩坑 → 直接记 Pitfall；新口径先确认后建 Metric」）。
+- `SKILL.md` 与本 skill 只负责通用流程（list→search→get→create）；具体
+  「什么场景自动记、什么场景先确认」以各目录注入规则为准。
+- 通用兜底（某分类无任何注入规则时）：检索未命中若确属缺失知识 → 可建概念
+  补录；任务收尾可 `wiki lint` 看断链/缺失清单。
 
 ## 6. 写入规范（门控与 trust）
 

@@ -86,7 +86,16 @@ describe("pi-wiki extension", () => {
     assert.match(r.text, /references\/AGENTS\.md/);
   });
 
-  test("口径类未 confirmed 被门控拦截", async () => {
+  test("无门控声明时默认自动记录", async () => {
+    const r = await run("wiki_create", {
+      path: "computations/rev-auto", type: "Attested Computation", title: "p", description: "d",
+    });
+    assert.match(r.text, /已创建/);
+  });
+
+  test("带门控节的 AGENTS.md 拦截未确认口径写入", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(tmpDir, "AGENTS.md"), "# 根规则\n\n## 门控\n\n- 需 human 确认: Metric, Attested Computation\n", "utf8");
     const r = await run("wiki_create", {
       path: "computations/rev-probe", type: "Attested Computation", title: "p", description: "d",
     });
