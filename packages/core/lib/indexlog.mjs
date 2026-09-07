@@ -33,32 +33,32 @@ export function renderIndexBody(graph, dir) {
     lines.push('')
     return lines.join('\n').trimEnd() + '\n'
   }
-  // 根视图：按一级目录分组
-  const groups = new Map() // 一级目录名 -> [{id,title,desc,type,rel}]
-  for (const [id, c] of graph.nodes) {
+  // 根视图：目录入口式——只列顶级目录入口 + 根目录散落概念，
+  // 明细下沉到各目录自己的 index.md（避免全库平铺）
+  const groups = new Map() // 一级目录名 -> count
+  const rootItems = []
+  for (const [id] of graph.nodes) {
     const segs = id.split('/')
-    const top = segs.length > 1 ? segs[0] : ''
-    if (!groups.has(top)) groups.set(top, [])
-    const rel = segs.length > 1 ? segs.slice(1).join('/') : id
-    groups.get(top).push({ id, title: c.title, desc: c.desc, type: c.type, rel })
+    if (segs.length === 1) {
+      rootItems.push(id)
+      continue
+    }
+    const top = segs[0]
+    groups.set(top, (groups.get(top) || 0) + 1)
   }
   const keys = [...groups.keys()].sort()
   for (const k of keys) {
-    if (k === '') {
-      // 根目录散落概念
-      lines.push('## (root)', '')
-      for (const it of groups.get('').sort((a, b) => a.title.localeCompare(b.title, 'zh'))) {
-        lines.push(indexLine(it))
-      }
-      lines.push('')
-      continue
-    }
-    lines.push(`## ${k}`, '')
-    for (const it of groups.get(k).sort((a, b) => a.title.localeCompare(b.title, 'zh'))) {
-      lines.push(indexLine(it))
-    }
-    lines.push('')
+    lines.push(`* [${k}](${k}/index.md) — ${groups.get(k)} 个概念`)
   }
+  if (rootItems.length) {
+    lines.push('', '## (root)', '')
+    for (const id of rootItems.sort((a, b) => a.localeCompare(b, 'zh'))) {
+      const c = graph.nodes.get(id)
+      const desc = c.desc ? ` — ${c.desc}` : ''
+      lines.push(`* [${c.title}](${id}.md)${desc}  \`${c.type}\``)
+    }
+  }
+  lines.push('')
   return lines.join('\n').trimEnd() + '\n'
 }
 
