@@ -18,12 +18,15 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const DEFAULT_DATA_DIR = path.join(os.homedir(), ".agents", "wiki");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// 加载 core：优先本仓库 packages/core（开发态），回退 npm 包 llm-wiki-core。
+// 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;
 function loadCore(): Promise<any> {
   if (corePromise) return corePromise;
-  const devPath = path.join(__dirname, "..", "..", "core", "index.mjs");
-  corePromise = import(devPath).catch(() => import("llm-wiki-core"));
+  const vendorPath = path.join(__dirname, "..", "vendor-core", "index.mjs");
+  corePromise = import(vendorPath).catch(async () => {
+    const devPath = path.join(__dirname, "..", "..", "core", "index.mjs");
+    return import(devPath);
+  });
   return corePromise;
 }
 

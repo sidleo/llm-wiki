@@ -17,6 +17,7 @@
   ],
   "files": [
     "extensions/",
+    "vendor-core/",
     "README.md"
   ],
   "pi": {
@@ -26,12 +27,10 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.mjs",
-    "check": "node --experimental-strip-types --check extensions/index.ts"
+    "check": "node --experimental-strip-types --check extensions/index.ts",
+    "sync-vendor": "node scripts/sync-vendor.mjs"
   },
   "dependencies": {
     "typebox": "^1.3.16"
-  },
-  "peerDependencies": {
-    "llm-wiki-core": "^0.1.0"
   }
 }

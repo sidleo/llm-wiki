@@ -18,17 +18,23 @@ import { fileURLToPath } from 'node:url'
 export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
-// core 加载：优先本仓库 packages/core（开发态），回退 npm 包 llm-wiki-core
+// core 加载：优先同包 vendor-core（自包含安装），回退本仓库 packages/core（开发态）
 const __dirname = dirname(fileURLToPath(import.meta.url))
 let core
 async function loadCore() {
   if (core) return core
-  const dev = join(__dirname, '..', 'core', 'index.mjs')
+  const vendor = join(__dirname, 'vendor-core', 'index.mjs')
   try {
-    await import('node:fs/promises').then((fs) => fs.access(dev))
-    core = await import(dev + '?t=' + Date.now())
+    await import('node:fs/promises').then((fs) => fs.access(vendor))
+    core = await import(vendor + '?t=' + Date.now())
   } catch {
-    core = await import('llm-wiki-core')
+    const dev = join(__dirname, '..', 'core', 'index.mjs')
+    try {
+      await import('node:fs/promises').then((fs) => fs.access(dev))
+      core = await import(dev + '?t=' + Date.now())
+    } catch {
+      throw new Error('llm-wiki-core 未找到：请运行 packages/dsh/scripts/sync-vendor.mjs 同步 vendor-core')
+    }
   }
   return core
 }

@@ -10,20 +10,18 @@
   },
   "files": [
     "wiki.mjs",
+    "vendor-core/",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
-  "dependencies": {
-    "llm-wiki-core": "^0.1.0"
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
-  },
-  "engines": {
-    "node": ">=18.0.0"
   },
   "license": "MIT"
 }
