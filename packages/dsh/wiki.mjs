@@ -107,6 +107,7 @@ export function apply(ctx, config) {
       '- wiki_create / wiki_update — 写入（门控读目录 AGENTS.md 规则，确认后带 human verified）',
       '- wiki_validate — OKF v0.2 合规校验；wiki_lint — 体检（断链/孤儿/过期/缺 index）',
       '- wiki_ingest — 登记外部源文件进 bundle；wiki_deprecate — 目录级批量停用（status: deprecated）',
+      '- wiki_help — 查机制文档（保留文件/怎么写 AGENTS.md/怎么写 APPEND_SYSTEM_PROMPT.md/frontmatter/门控）。想给某分类加行为规则 → 在该目录建 APPEND_SYSTEM_PROMPT.md（正文即追加的 system prompt）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节。详情 wiki help。',
     ]
     // 目录自定注入：各目录 APPEND_SYSTEM_PROMPT.md 内容（根 + 全部子目录）
     // 通用插件本身不含任何场景写死的提示词；各分类自己决定注入什么规则
@@ -437,6 +438,23 @@ export function apply(ctx, config) {
         const rules = await c.resolveRules(dataDir, String(args.path || ''))
         if (!rules.length) return { text: '（无 AGENTS.md 规则）' }
         return { text: rules.map((r) => `===== ${r.path} =====\n${r.content.trimEnd()}`).join('\n\n').slice(0, maxGetChars) }
+      } catch (e) { return strErr(e) }
+    },
+  })
+
+  // —— wiki_help ——
+  ctx.tools.register({
+    name: 'wiki_help',
+    description: '查 llm-wiki 机制文档：保留文件一览 / 怎么写目录 AGENTS.md / 怎么写 APPEND_SYSTEM_PROMPT.md（分类行为注入）/ OKF frontmatter 速查 / 门控判定逻辑。想给某分类加行为规则或门控时先查它。',
+    parameters: {
+      type: 'object',
+      properties: { topic: { type: 'string', description: '主题：quickstart | files | agents | append | frontmatter | gate（缺省 quickstart）' } },
+    },
+    output: out,
+    async execute(args) {
+      try {
+        const c = await loadCore()
+        return { text: c.getHelp(args.topic).slice(0, maxGetChars) }
       } catch (e) { return strErr(e) }
     },
   })

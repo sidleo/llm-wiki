@@ -208,9 +208,15 @@ async function main() {
       console.log(`index updated for ${dir || '(root)'}`)
       break
     }
+    case 'help': {
+      const topic = positional(rest).join(' ') || arg(rest, '--topic')
+      console.log(core.getHelp(topic))
+      break
+    }
     default:
       console.log(`wiki CLI — llm-wiki core 工具
-用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|index> [args] [--dataDir DIR]`)
+用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|index|help> [args] [--dataDir DIR]
+主题: wiki help [quickstart|files|agents|append|frontmatter|gate]`)
       process.exit(cmd ? 1 : 0)
   }
 }

@@ -41,8 +41,8 @@ async function main() {
 
   check('插件名 wiki-registry', plugin.name === 'wiki-registry')
   check('依赖 systemPrompt/tools', plugin.inject.join(',') === 'systemPrompt,tools')
-  const expected = ['wiki_list', 'wiki_search', 'wiki_get', 'wiki_create', 'wiki_update', 'wiki_validate', 'wiki_lint', 'wiki_ingest', 'wiki_deprecate', 'wiki_rules']
-  check('注册 10 个工具', expected.every((n) => tools.has(n)) && tools.size === 10, `got ${tools.size}`)
+  const expected = ['wiki_list', 'wiki_search', 'wiki_get', 'wiki_create', 'wiki_update', 'wiki_validate', 'wiki_lint', 'wiki_ingest', 'wiki_deprecate', 'wiki_rules', 'wiki_help']
+  check('注册 11 个工具', expected.every((n) => tools.has(n)) && tools.size === 11, `got ${tools.size}`)
 
   // 描述层组装
   await handlers['system-prompt/assemble'](assembly, {}, async () => {})
@@ -78,6 +78,14 @@ async function main() {
   check('Table 确认后创建成功', /已创建/.test(createOk.text), createOk.text)
   const fileText = await readFile(join(tmp, 'tables', 'probe_x.md'), 'utf8')
   check('创建文件含 verified human', fileText.includes('verified') && fileText.includes('tester'))
+
+  // wiki_help：机制文档自助查询
+  const helpAppend = await tools.get('wiki_help').execute({ topic: 'append' })
+  check('wiki_help append 讲清注入文件写法', /APPEND_SYSTEM_PROMPT/.test(helpAppend.text) && /正文/.test(helpAppend.text), helpAppend.text.slice(0, 120))
+  const helpAgents = await tools.get('wiki_help').execute({ topic: 'agents' })
+  check('wiki_help agents 讲清门控节写法', /门控/.test(helpAgents.text), helpAgents.text.slice(0, 120))
+  const helpUnknown = await tools.get('wiki_help').execute({ topic: 'nope' })
+  check('wiki_help 未知主题回主题列表', /quickstart/.test(helpUnknown.text))
 
   await rm(tmp, { recursive: true, force: true })
   console.log(`\n结果: ${passed} passed, ${failed} failed`)

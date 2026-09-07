@@ -58,6 +58,9 @@ metadata:
 | `wiki ingest SOURCE [--ref-dir DIR]` | 登记外部源文件进 bundle（copy 不改源） |
 | `wiki deprecate DIR` | 目录级批量标 `status: deprecated` |
 | `wiki rules DIR` | 查看该目录生效的 AGENTS.md 规则（含向上遍历结果） |
+| `wiki help [主题]` | 查机制文档：quickstart｜files｜agents（怎么写 AGENTS.md）｜append（怎么写 APPEND_SYSTEM_PROMPT.md）｜frontmatter｜gate |
+
+想给某分类加行为规则 → 在该目录新建 `APPEND_SYSTEM_PROMPT.md`（正文即追加进 system prompt 的行为引导，写法见 `wiki help append`）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节（写法见 `wiki help agents`）。
 
 ## 5. 主动知识记录（分类自定义规则驱动）
 

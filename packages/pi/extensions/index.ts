@@ -2,7 +2,7 @@
  * pi-wiki — Pi 扩展（llm-wiki 通用知识库，OKF v0.2）。
  *
  * 复用 llm-wiki-core 的全部逻辑（与 DSH 插件 / skill CLI 同一实现），
- * 注册 10 个 wiki_* 工具 + prompt 引导。数据目录默认 ~/.agents/wiki，
+ * 注册 11 个 wiki_* 工具 + prompt 引导。数据目录默认 ~/.agents/wiki，
  * 环境变量 PI_WIKI_DATA_DIR 覆盖。
  *
  * Pi 无 DSH 的 system-prompt section 瀑布：用每个工具的 promptSnippet +
@@ -327,10 +327,28 @@ function registerTools(pi: ExtensionAPI, dataDir: string): void {
       }
     },
   });
+
+  // wiki_help
+  pi.registerTool({
+    name: "wiki_help",
+    label: "Wiki Help",
+    description: "查 llm-wiki 机制文档：保留文件一览 / 怎么写目录 AGENTS.md / 怎么写 APPEND_SYSTEM_PROMPT.md（分类行为注入）/ OKF frontmatter 速查 / 门控判定逻辑。想给分类加行为规则或门控时先查它。",
+    promptSnippet: "机制文档：查保留文件/AGENTS/APPEND 写法",
+    promptGuidelines: WIKI_GUIDELINES,
+    parameters: Type.Object({ topic: Type.Optional(Type.String({ description: "主题：quickstart | files | agents | append | frontmatter | gate（缺省 quickstart）" })) }),
+    async execute(_id, params) {
+      try {
+        const core = await loadCore();
+        return ok(core.getHelp(params.topic));
+      } catch (e) {
+        return err(e);
+      }
+    },
+  });
 }
 
 /**
- * Pi 扩展默认导出：注册 10 个 wiki_* 工具。
+ * Pi 扩展默认导出：注册 11 个 wiki_* 工具。
  * 数据目录可用环境变量 PI_WIKI_DATA_DIR 覆盖（默认 ~/.agents/wiki）。
  */
 export default function (pi: ExtensionAPI, _ctx?: ExtensionContext): void {

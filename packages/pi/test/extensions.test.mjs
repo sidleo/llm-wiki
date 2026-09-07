@@ -53,9 +53,9 @@ describe("pi-wiki extension", () => {
   };
 
   test("注册 10 个 wiki_* 工具", () => {
-    const expected = ["wiki_list", "wiki_search", "wiki_get", "wiki_create", "wiki_update", "wiki_validate", "wiki_lint", "wiki_ingest", "wiki_deprecate", "wiki_rules"];
+    const expected = ["wiki_list", "wiki_search", "wiki_get", "wiki_create", "wiki_update", "wiki_validate", "wiki_lint", "wiki_ingest", "wiki_deprecate", "wiki_rules", "wiki_help"];
     for (const n of expected) assert.ok(registered.has(n), `缺少 ${n}`);
-    assert.equal(registered.size, 10);
+    assert.equal(registered.size, 11);
   });
 
   test("wiki_validate 合规", async () => {
@@ -118,5 +118,12 @@ describe("pi-wiki extension", () => {
   test("wiki_lint 无断链", async () => {
     const r = await run("wiki_lint");
     assert.match(r.text, /"broken":0/);
+  });
+
+  test("wiki_help 返回机制文档", async () => {
+    const r = await run("wiki_help", { topic: "append" });
+    assert.match(r.text, /APPEND_SYSTEM_PROMPT/);
+    const q = await run("wiki_help", {});
+    assert.match(q.text, /quickstart|快速上手/);
   });
 });
