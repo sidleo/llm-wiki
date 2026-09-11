@@ -11,10 +11,10 @@ An open-source, generic, agent-first knowledge base: **the format layer strictly
 
 ## Features
 
-- **Progressive disclosure** — every session starts with a compact knowledge-base summary; `wiki_list` shows the whole tree first, then you search and drill in.
+- **Progressive disclosure** — every session carries injected tool guidance plus the active bundle/category list; `wiki_list` shows the whole tree first, then you search and drill in.
 - **Real cross-links + automatic backlinks** — concepts reference each other with Markdown links; reading a concept automatically surfaces the pitfalls and rules that cite it.
 - **Directory-level rules (`AGENTS.md`)** — per-directory write gates (which concept types need human confirmation) and behavioral conventions, resolved bottom-up with child directories overriding parents.
-- **Per-directory system-prompt injection (`APPEND_SYSTEM_PROMPT.md`)** — each category can define its own behavior rules that get injected into the agent's prompt every turn.
+- **Per-directory prompt injection (`APPEND_SYSTEM_PROMPT.md`)** — each category can define its own behavior rules. On DSH they ride the runtime-context snapshot (session tail, re-appended only when branch or rules change); on pi they load once per session. They stay out of the system prompt so injection never invalidates the prompt prefix cache.
 - **Lifecycle** — `stale_after` expiry, `status: deprecated` (concept-level) and directory-level deprecation, auto-maintained `index.md` / `log.md`.
 - **Validation & health** — `wiki_validate` (OKF compliance) and `wiki_lint` (broken links, orphans, stale entries, missing index).
 - **Multiple bundles** — register several wiki directories as named bundles and switch between them (session-level or persisted globally).
@@ -39,7 +39,7 @@ my-wiki/
 - **Concept** — one `.md` file with `type`-required OKF frontmatter plus a Markdown body. The concept id is its path relative to the bundle root (e.g. `tables/orders`).
 - **Cross-links** — reference other concepts with `[label](/path.md)` or `[[wiki-link]]`; reading a concept automatically surfaces backlinks (the concepts/pitfalls that cite it).
 - **Reserved files** — at any depth, only `index.md` / `log.md` / `AGENTS.md` / `APPEND_SYSTEM_PROMPT.md` are special; every other `.md` is a concept.
-- **Progressive disclosure** — start from the injected summary → `wiki_list` → `wiki_search` → `wiki_get`.
+- **Progressive disclosure** — start from the injected bundle/category list → `wiki_list` → `wiki_search` → `wiki_get`.
 
 ## Repository Layout
 
@@ -62,7 +62,7 @@ llm-wiki/
 
 | Form | Install | Capability |
 |------|---------|-----------|
-| DSH plugin | `dsh plugin --profile web add @sidleo3/dsh-wiki` | Per-turn prompt section (optional) + `wiki_*` tools |
+| DSH plugin | `dsh plugin --profile web add @sidleo3/dsh-wiki` | Layered injection (constant section + session snapshot, optional) + `wiki_*` tools |
 | pi extension | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` tools + prompt guidance |
 | skill + CLI | `~/.agents/skills/wiki/` (see `packages/skill/INSTALL.md`) | SKILL.md guidance + `wiki` CLI (any agent harness) |
 
@@ -115,7 +115,7 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 
 ```bash
 node scripts/smoke-test.mjs              # 36 checks: core tool chain + registry + ingest/lint end-to-end
-node tests/dsh-mock-test.mjs             # 26 checks: DSH plugin (mock host) tools + prompt section + gates + multi-bundle
+node tests/dsh-mock-test.mjs             # 31 checks: DSH plugin (mock host) tools + injection layers + gates + multi-bundle
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 checks: pi extension (mock pi)
 node --test tests/three-forms.test.mjs   # 5 checks: all three forms read/write the same bundle consistently
 ```

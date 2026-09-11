@@ -1,6 +1,6 @@
 {
   "name": "@sidleo3/dsh-wiki",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DSH plugin for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle with progressive disclosure. Registers 13 tools: wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules/help/dirs/use. Named multi-bundle directories with session/global switching. Self-contained (vendor-core embedded).",
   "type": "module",
   "main": "wiki.mjs",

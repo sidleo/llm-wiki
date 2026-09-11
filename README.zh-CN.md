@@ -11,10 +11,10 @@
 
 ## 特性
 
-- **渐进披露**——每轮会话注入精简的知识库摘要；先 `wiki_list` 看全貌，再检索、再深入。
+- **渐进披露**——每轮会话注入工具引导与当前 bundle / 分类清单；先 `wiki_list` 看全貌，再检索、再深入。
 - **真实交叉链接 + 自动 backlinks**——概念用 Markdown 链接互相关联；读取一个概念时自动附带引用它的坑点与规则。
 - **目录级规则（`AGENTS.md`）**——每个目录可定义写入门控（哪些概念类型需 human 确认）与行为约定，向上遍历取最近、子目录覆盖父目录。
-- **目录级提示词注入（`APPEND_SYSTEM_PROMPT.md`）**——每个分类可自定义行为规则，正文原样追加进 agent 的 system prompt 每轮注入。
+- **目录级提示词注入（`APPEND_SYSTEM_PROMPT.md`）**——每个分类可自定义行为规则。DSH 形态走运行时上下文快照（会话尾部，分支或规则变了才更新一条）；pi 形态加载期读一次。两者都不放进 system prompt，避免注入内容打断前缀缓存。
 - **生命周期**——`stale_after` 过期、`status: deprecated`（概念级）与目录级批量停用、自动维护 `index.md` / `log.md`。
 - **校验与体检**——`wiki_validate`（OKF 合规）与 `wiki_lint`（断链、孤儿页、过期、缺 index）。
 - **多目录（命名 bundle）**——注册多个 wiki 目录为命名分支，可切换（会话级或全局持久）。
@@ -39,7 +39,7 @@ my-wiki/
 - **概念** = 一个 `.md` 文件：OKF 合规 frontmatter（`type` 必填）+ markdown 正文；概念 id = 相对 bundle 根的路径（如 `tables/orders`）。
 - **交叉链接**——用 `[label](/path.md)` 或 `[[wiki-link]]` 引用其他概念；读取一个概念时自动附带 backlinks（引用它的概念/坑点）。
 - **保留文件**——任意层级只有 `index.md` / `log.md` / `AGENTS.md` / `APPEND_SYSTEM_PROMPT.md` 是特殊的；其余所有 `.md` 都是概念。
-- **渐进披露**——从注入的摘要 → `wiki_list` → `wiki_search` → `wiki_get`。
+- **渐进披露**——从注入的 bundle/分类清单 → `wiki_list` → `wiki_search` → `wiki_get`。
 
 ## 仓库结构
 
@@ -62,7 +62,7 @@ llm-wiki/
 
 | 形态 | 安装 | 能力 |
 |------|------|------|
-| DSH 插件 | `dsh plugin --profile web add @sidleo3/dsh-wiki` | 每轮描述层注入（可选优化）+ `wiki_*` 工具 |
+| DSH 插件 | `dsh plugin --profile web add @sidleo3/dsh-wiki` | 注入分层（恒定 section + 会话快照，可选优化）+ `wiki_*` 工具 |
 | pi 扩展 | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` 工具 + prompt 引导 |
 | skill + CLI | `~/.agents/skills/wiki/`（见 packages/skill/INSTALL.md） | SKILL.md 引导 + `wiki` CLI（任意 agent 可用） |
 
@@ -115,7 +115,7 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 
 ```bash
 node scripts/smoke-test.mjs              # 36 项：core 工具链 + 注册表 + ingest/lint 端到端
-node tests/dsh-mock-test.mjs             # 26 项：DSH 插件（mock 宿主）工具注册 + 描述层 + 门控 + 多目录
+node tests/dsh-mock-test.mjs             # 31 项：DSH 插件（mock 宿主）工具注册 + 注入分层 + 门控 + 多目录
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 项：pi 扩展（mock pi）
 node --test tests/three-forms.test.mjs   # 5 项：三形态读写同一 bundle 一致性
 ```

@@ -6,6 +6,15 @@
  * - 注册 11 个 wiki_* 工具
  * - 写入门控：读 AGENTS.md 规则后由 agent 交互确认（无代码强制弹窗）
  *
+ * 注入分两层（前缀缓存决定，勿混）：
+ * - 恒定层：工具引导 section（order 62），模块级常量，任何会话/分支/用户逐字节相同；
+ *   system prompt 渲染不变 → DSH 的 SystemPromptProjection 恒为 no-op（不追加、不改写）。
+ * - 会话层：当前 bundle/目录清单/APPEND_SYSTEM_PROMPT 规则 → runtime context 快照，
+ *   由宿主追加在会话尾部，只在内容真变化时产生新消息；绝不放 system prompt——
+ *   否则最小代价是「追加一整份完整 prompt」，在请求序列边界（如 goal round）是「整段前缀作废」。
+ *   因此计数（共 N 个概念 / N concepts）不进注入：它是每次写入都变的高频 churn 源，
+ *   清单归 wiki_list / wiki_dirs。
+ *
  * 数据目录默认 ~/.agents/wiki（os.homedir() 计算，可经 profile 补丁 config
  * dataDir 覆盖）。多目录：config.dataDirs 声明命名 bundle（与注册表
  * ~/.agents/wiki-registry.json 合并，同名 config 优先）；wiki_use 会话级切换
@@ -46,9 +55,33 @@ const DEFAULTS = {
   sectionName: 'wiki-registry',
   sectionOrder: 62,
   maxSectionChars: 6000,
+  contextOrder: 130,
+  maxContextChars: 12000,
   maxGetChars: 40000,
   cacheTtlMs: 30000,
 }
+
+/** 会话层 runtime context 的稳定名（第一方约定 `ns:name`，见 sandbox:policy / subagent:delegation）。 */
+const CONTEXT_NAME = 'wiki-registry:bundle'
+
+/**
+ * 恒定层正文：所有会话、所有 bundle 分支、所有用户逐字节相同。
+ * 【不变量】禁止加入任何会话/机器可变值（路径、计数、时间戳、bundle 名、版本号）——
+ * 一个字节的差异就会让整个 system prompt 前缀失去复用。
+ */
+const SECTION_TEXT = [
+  '## 通用知识库（llm-wiki · OKF v0.2）',
+  '> 目录自由分层（表/口径计算/坑点/指标…靠 type 区分），概念间用真实链接交叉引用。',
+  '> 【硬要求】涉及知识检索/写入的第一步：先 `wiki_list` 看全貌（渐进披露），再决定下一步——不要凭印象直接搜或写。',
+  '- 步骤1 wiki_list — 目录树 + 概念清单（type/title/id）',
+  '- 步骤2 wiki_search — 关键词检索（匹配 frontmatter + 正文）',
+  '- 步骤3 wiki_get — 读取单个概念完整正文（自动附 backlinks：引用它的坑点/概念）',
+  '- wiki_create / wiki_update — 写入（门控读目录 AGENTS.md 规则，确认后带 human verified）',
+  '- wiki_validate — OKF v0.2 合规校验；wiki_lint — 体检（断链/孤儿/过期/缺 index）',
+  '- wiki_ingest — 登记外部源文件进 bundle；wiki_deprecate — 目录级批量停用（status: deprecated）',
+  '- wiki_dirs — 查看已配置的目录分支；wiki_use <name> [global:true] — 切换当前分支（会话级/持久化全局默认）',
+  '- wiki_help — 查机制文档（保留文件/怎么写 AGENTS.md/怎么写 APPEND_SYSTEM_PROMPT.md/frontmatter/门控/多目录）。想给某分类加行为规则 → 在该目录建 APPEND_SYSTEM_PROMPT.md（正文即追加的 system prompt）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节。详情 wiki help。',
+].join('\n')
 
 function listVal(v) {
   if (v === undefined || v === null || v === '') return []
@@ -88,14 +121,19 @@ export function apply(ctx, config) {
   const sectionName = String(config?.sectionName || DEFAULTS.sectionName)
   const sectionOrder = Number.isFinite(config?.sectionOrder) ? config.sectionOrder : DEFAULTS.sectionOrder
   const maxSectionChars = Number.isFinite(config?.maxSectionChars) ? config.maxSectionChars : DEFAULTS.maxSectionChars
+  const contextOrder = Number.isFinite(config?.contextOrder) ? config.contextOrder : DEFAULTS.contextOrder
+  const maxContextChars = Number.isFinite(config?.maxContextChars) ? config.maxContextChars : DEFAULTS.maxContextChars
   const maxGetChars = Number.isFinite(config?.maxGetChars) ? config.maxGetChars : DEFAULTS.maxGetChars
   const cacheTtlMs = Number.isFinite(config?.cacheTtlMs) ? config.cacheTtlMs : DEFAULTS.cacheTtlMs
+  const sectionText = SECTION_TEXT.length > maxSectionChars
+    ? SECTION_TEXT.slice(0, maxSectionChars) + '\n…（描述层超限截断）'
+    : SECTION_TEXT
 
   // —— 会话级目录状态：按对话 agent 隔离；无 agent（重放等）走 plainActive ——
   const sessionActive = new WeakMap() // agent → {name, path}（wiki_use 会话级切换）
-  const sectionCache = new WeakMap() // agent → {path, text, at}
+  const sessionContextCache = new WeakMap() // agent → {name, path, text, at}
   let plainActive = null // agent 缺失时的会话态兜底
-  let plainSectionCache = null
+  let plainContextCache = null
   let cachedGlobal = null // 全局默认（注册表 active 或 default）短缓存
   let cachedGlobalAt = 0
 
@@ -120,38 +158,34 @@ export function apply(ctx, config) {
     return globalActive()
   }
 
-  /** wiki_use 后清理该对话的会话态与描述层缓存（下轮 assemble 重建）。 */
+  /** wiki_use 后清理该对话的会话态与注入缓存（下轮 assemble 重建）。 */
   function clearSession(agent) {
     if (agent) {
       sessionActive.delete(agent)
-      sectionCache.delete(agent)
+      sessionContextCache.delete(agent)
     } else {
       plainActive = null
-      plainSectionCache = null
+      plainContextCache = null
     }
   }
 
-  async function buildSection(dir) {
+  /**
+   * 会话层正文：当前 bundle（名 + 路径）+ 目录名清单 + 各目录 APPEND_SYSTEM_PROMPT.md 规则。
+   * 【不变量】只放「变化很慢」的事实：目录**计数**属高频 churn，绝不进快照（归 wiki_list）。
+   */
+  async function buildContext(active) {
     const c = await loadCore()
-    const tree = await c.listBundle(dir)
-    const total = tree.reduce((n, t) => n + t.concepts.length, 0)
-    const lines = [
-      '## 通用知识库（llm-wiki · OKF v0.2）',
-      `> 数据源：${dir}。共 ${total} 个概念，目录自由分层（表/口径计算/坑点/指标…靠 type 区分），概念间用真实链接交叉引用。`,
-      '> 【硬要求】涉及知识检索/写入的第一步：先 `wiki_list` 看全貌（渐进披露），再决定下一步——不要凭印象直接搜或写。',
-      '- 步骤1 wiki_list — 目录树 + 概念清单（type/title/id）',
-      '- 步骤2 wiki_search — 关键词检索（匹配 frontmatter + 正文）',
-      '- 步骤3 wiki_get — 读取单个概念完整正文（自动附 backlinks：引用它的坑点/概念）',
-      '- wiki_create / wiki_update — 写入（门控读目录 AGENTS.md 规则，确认后带 human verified）',
-      '- wiki_validate — OKF v0.2 合规校验；wiki_lint — 体检（断链/孤儿/过期/缺 index）',
-      '- wiki_ingest — 登记外部源文件进 bundle；wiki_deprecate — 目录级批量停用（status: deprecated）',
-      '- wiki_dirs — 查看已配置的目录分支；wiki_use <name> [global:true] — 切换当前分支（会话级/持久化全局默认）',
-      '- wiki_help — 查机制文档（保留文件/怎么写 AGENTS.md/怎么写 APPEND_SYSTEM_PROMPT.md/frontmatter/门控/多目录）。想给某分类加行为规则 → 在该目录建 APPEND_SYSTEM_PROMPT.md（正文即追加的 system prompt）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节。详情 wiki help。',
-    ]
+    const lines = [`当前知识库：${active.name || 'default'}（${active.path}）`]
+    try {
+      const tree = await c.listBundle(active.path)
+      if (tree.length) lines.push(`可用目录：${tree.map((t) => t.dir || '(root)').join('、')}`)
+    } catch {
+      // 读盘失败不影响规则注入
+    }
     // 目录自定注入：各目录 APPEND_SYSTEM_PROMPT.md 内容（根 + 全部子目录）
     // 通用插件本身不含任何场景写死的提示词；各分类自己决定注入什么规则
     try {
-      const prompts = await c.collectInjectPrompts(dir)
+      const prompts = await c.collectInjectPrompts(active.path)
       if (prompts.length) {
         lines.push('', '【知识库自定义规则】以下内容来自各目录 APPEND_SYSTEM_PROMPT.md（用户为该分类定义的 system prompt 追加）：', '')
         for (const p of prompts) {
@@ -161,27 +195,20 @@ export function apply(ctx, config) {
     } catch {
       // 注入失败不影响描述层（静默降级）
     }
-    lines.push(
-      '',
-      ...tree.map((t) => {
-        const dep = t.concepts.filter((c) => c.status === 'deprecated').length
-        return `- [${t.dir || '(root)'}] ${t.concepts.length} concepts${dep ? `（${dep} deprecated）` : ''}`
-      }),
-    )
     let text = lines.join('\n')
-    if (text.length > maxSectionChars) text = text.slice(0, maxSectionChars) + '\n…（描述层超限截断）'
+    if (text.length > maxContextChars) text = text.slice(0, maxContextChars) + '\n…（会话上下文快照超限截断）'
     return text
   }
 
-  async function getSectionText(dir, agent) {
+  async function getContextText(active, agent) {
     const now = Date.now()
     const key = agent || null
-    const hit = key ? sectionCache.get(key) : plainSectionCache
-    if (hit && hit.path === dir && now - hit.at < cacheTtlMs) return hit.text
-    const text = await buildSection(dir)
-    const entry = { path: dir, text, at: now }
-    if (key) sectionCache.set(key, entry)
-    else plainSectionCache = entry
+    const hit = key ? sessionContextCache.get(key) : plainContextCache
+    if (hit && hit.name === active.name && hit.path === active.path && now - hit.at < cacheTtlMs) return hit.text
+    const text = await buildContext(active)
+    const entry = { name: active.name, path: active.path, text, at: now }
+    if (key) sessionContextCache.set(key, entry)
+    else plainContextCache = entry
     return text
   }
 
@@ -189,16 +216,24 @@ export function apply(ctx, config) {
   ctx.on('system-prompt/assemble', async (assembly, assembleContext, next) => {
     try {
       const agent = (assembleContext && (assembleContext.agent || assembleContext.scope)) || null
-      const active = await resolveActive(agent)
-      const text = await getSectionText(active.path, agent)
+      // 恒定层：不读盘、无会话态 → 任何会话渲染结果逐字节相同，投影恒为 no-op
       if (assembly && Array.isArray(assembly.sections)) {
         const existing = assembly.sections.findIndex((s) => s && s.name === sectionName)
-        const section = { name: sectionName, text, order: sectionOrder }
+        const section = { name: sectionName, text: sectionText, order: sectionOrder }
         if (existing >= 0) assembly.sections[existing] = section
         else assembly.sections.push(section)
       }
+      // 会话层：交给 runtime context 快照（会话尾部追加；内容未变则宿主不产生消息）
+      const active = await resolveActive(agent)
+      const text = await getContextText(active, agent)
+      if (text && assembly && Array.isArray(assembly.contexts)) {
+        const existing = assembly.contexts.findIndex((c) => c && c.name === CONTEXT_NAME)
+        const context = { name: CONTEXT_NAME, order: contextOrder, text }
+        if (existing >= 0) assembly.contexts[existing] = context
+        else assembly.contexts.push(context)
+      }
     } catch {
-      // 静默降级
+      // 静默降级（恒定层已在上方写入，不因会话态解析失败而丢失）
     }
     return next()
   })
@@ -359,7 +394,7 @@ export function apply(ctx, config) {
             confirmed: args.confirmed === true,
             user: args.user || 'human:unknown',
             producer: 'dsh-wiki',
-            version: '0.2.0',
+            version: '0.2.1',
           },
         })
         return { text: `已创建 ${created.id}` }
@@ -391,7 +426,7 @@ export function apply(ctx, config) {
           title: args.title, description: args.description, body: args.body,
           type: args.type, status: args.status,
           tags: args.tags ? args.tags.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
-          opts: { confirmed: args.confirmed === true, user: args.user || 'human:unknown', producer: 'dsh-wiki', version: '0.2.0' },
+          opts: { confirmed: args.confirmed === true, user: args.user || 'human:unknown', producer: 'dsh-wiki', version: '0.2.1' },
         }
         await c.updateConcept(dataDir, args.id, patch)
         return { text: `已更新 ${args.id}` }
@@ -453,7 +488,7 @@ export function apply(ctx, config) {
       try {
         const c = await loadCore()
         const dataDir = (await resolveActive(exec && exec.agent)).path
-        const r = await c.ingestSource(dataDir, { source: args.source, refDir: args.ref_dir }, { producer: 'dsh-wiki', version: '0.2.0' })
+        const r = await c.ingestSource(dataDir, { source: args.source, refDir: args.ref_dir }, { producer: 'dsh-wiki', version: '0.2.1' })
         return { text: `ingested → ${r.refPath}${r.existed ? ' (existed)' : ''}; 来源概念 ${r.sourceConceptId}` }
       } catch (e) { return strErr(e) }
     },
@@ -557,10 +592,10 @@ export function apply(ctx, config) {
         }
         if (agent) {
           sessionActive.set(agent, resolved)
-          sectionCache.delete(agent)
+          sessionContextCache.delete(agent)
         } else {
           plainActive = resolved
-          plainSectionCache = null
+          plainContextCache = null
         }
         const lines = [`已切换到 ${resolved.name} → ${resolved.path}`]
         lines.push(args.global === true ? '（已持久化为全局默认，新会话与 CLI/pi 生效）' : '（会话级，仅当前对话生效）')

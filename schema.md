@@ -17,7 +17,7 @@
 ├── APPEND_SYSTEM_PROMPT.md      # 保留（本项目扩展）：bundle 级 system prompt 注入
 ├── <领域>/                    # 目录自由分层，路径即分组
 │   ├── AGENTS.md              # 可选：该目录规则（缺失时向上遍历）
-│   ├── APPEND_SYSTEM_PROMPT.md  # 可选：该目录自定义注入（描述层并入 system prompt）
+│   ├── APPEND_SYSTEM_PROMPT.md  # 可选：该目录自定义注入（注入层每轮下发给 agent）
 │   ├── index.md               # 可选：该目录索引
 │   └── <concept>.md           # 概念文档
 ```
@@ -29,7 +29,7 @@
 | `index.md` | 目录索引。无 frontmatter（bundle 根可带 `okf_version`）。正文=分组标题 + 链接列表 |
 | `log.md` | 变更历史。日期标题 `YYYY-MM-DD`，最新在前。条目形如 `* **Update**: …` |
 | `AGENTS.md` | **本项目扩展**：该目录（子树）的 agent 规则。无 frontmatter、不作 concept、不参与 OKF type 校验。见 SPEC-EXTENSIONS.md |
-| `APPEND_SYSTEM_PROMPT.md` | **本项目扩展**：该目录用户自定义的 system prompt 追加内容。无 frontmatter、不作 concept。描述层每轮并入。见 SPEC-EXTENSIONS.md |
+| `APPEND_SYSTEM_PROMPT.md` | **本项目扩展**：该目录用户自定义的规则注入内容。无 frontmatter、不作 concept。注入层每轮下发给 agent（通道见 SPEC-EXTENSIONS.md）。 |
 
 保留文件**不得**用作概念文档；其余所有 `.md` 都是 concept。
 

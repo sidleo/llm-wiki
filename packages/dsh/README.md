@@ -18,9 +18,16 @@ dsh plugin --profile web add link:/path/to/packages/dsh
 
 ## 能力
 
-- **描述层注入**（可选宿主优化）：每轮 system prompt 注入精简 section——bundle 路径 +
-  目录树摘要 + 工具用法 + 【硬要求】第一步先 `wiki_list`
-  （`system-prompt/assemble` 瀑布，apply 同步注册，异步读盘不外抛）。
+- **注入分两层**（可选宿主优化；`system-prompt/assemble` 瀑布，apply 同步注册，异步读盘不外抛）：
+  - **恒定层**：工具用法 + 【硬要求】第一步先 `wiki_list`，作为 system prompt section
+    （`sectionOrder: 62`）注入。文本是模块级常量——任何会话 / 任何 bundle 分支 / 任何用户
+    逐字节相同，所以注入内容永远不会打断提供方的前缀缓存。
+  - **会话层**：当前 bundle（名 + 路径）+ 目录清单 + 各目录 `APPEND_SYSTEM_PROMPT.md` 规则，
+    走 **runtime context 快照**（宿主追加在会话尾部，内容未变则不产生新消息；切换分支 /
+    改规则才更新一条）。放进 system prompt 的代价是一字节变化就得重发整份 prompt，
+    在目标续跑等请求序列边界上更是整段前缀作废——故不放。
+  - **概念计数不参与注入**（每次写入都变的高频源），目录树与分支清单按需用
+    `wiki_list` / `wiki_dirs` 获取。
 - **13 个工具**：`wiki_list` / `wiki_search` / `wiki_get`（附 backlinks）/ `wiki_create` /
   `wiki_update` / `wiki_validate` / `wiki_lint` / `wiki_ingest` / `wiki_deprecate` /
   `wiki_rules` / `wiki_help`（机制文档自助查）/ `wiki_dirs` / `wiki_use`。
@@ -42,6 +49,8 @@ dsh plugin --profile web add link:/path/to/packages/dsh
     sectionName: wiki-registry
     sectionOrder: 62
     maxSectionChars: 6000
+    contextOrder: 130
+    maxContextChars: 12000
     maxGetChars: 40000
     cacheTtlMs: 30000
 ```
@@ -67,7 +76,7 @@ dsh plugin --profile web add link:/path/to/packages/dsh
 
 ```bash
 node --check wiki.mjs
-node tests/dsh-mock-test.mjs        # 宿主无关 mock：11 工具注册 + 描述层 + 门控
+node tests/dsh-mock-test.mjs        # 宿主无关 mock：13 工具注册 + 注入分层 + 门控 + 多目录（31 项）
 ```
 
 ## 依赖

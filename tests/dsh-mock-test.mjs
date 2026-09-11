@@ -2,8 +2,8 @@
  * tests/dsh-mock-test.mjs —— DSH 插件宿主无关验证（mock ctx）。
  *
  * 不依赖真实 dsh web 运行时：构造最小 ctx（on/工具注册表），
- * 验证 apply 注册 13 个工具、描述层 section 组装、关键工具可执行、
- * 多目录 wiki_dirs/wiki_use（会话级切换 + 全局持久）。
+ * 验证 apply 注册 13 个工具、注入分层（恒定层 section + 会话层 runtime context）、
+ * 关键工具可执行、多目录 wiki_dirs/wiki_use（会话级切换 + 全局持久）。
  */
 
 import { mkdtemp, rm, cp, readFile, writeFile } from 'node:fs/promises'
@@ -42,19 +42,28 @@ async function main() {
     systemPrompt: {},
   }
 
-  const assembly = { sections: [] }
-  plugin.apply(ctx, { dataDir: tmp, dataDirs: { demo: tmp, other: tmp2 } })
+  const assembly = { sections: [], contexts: [] }
+  // cacheTtlMs: 0 → 每次 assemble 都重读，保证「逐字节不变」断言真的检验了内容而非缓存
+  plugin.apply(ctx, { dataDir: tmp, dataDirs: { demo: tmp, other: tmp2 }, cacheTtlMs: 0 })
 
   check('插件名 wiki-registry', plugin.name === 'wiki-registry')
   check('依赖 systemPrompt/tools', plugin.inject.join(',') === 'systemPrompt,tools')
   const expected = ['wiki_list', 'wiki_search', 'wiki_get', 'wiki_create', 'wiki_update', 'wiki_validate', 'wiki_lint', 'wiki_ingest', 'wiki_deprecate', 'wiki_rules', 'wiki_help', 'wiki_dirs', 'wiki_use']
   check('注册 13 个工具', expected.every((n) => tools.has(n)) && tools.size === 13, `got ${tools.size}`)
 
-  // 描述层组装
+  // 注入分层：恒定层 = system prompt section；会话层 = runtime context 快照
   await handlers['system-prompt/assemble'](assembly, {}, async () => {})
   const section = assembly.sections.find((s) => s.name === 'wiki-registry')
-  check('描述层注入', section && section.text.includes('llm-wiki'))
-  check('描述层含数据源路径', section && section.text.includes(tmp))
+  const context = assembly.contexts.find((c) => c.name === 'wiki-registry:bundle')
+  check('恒定层 section 注入', section && section.text.includes('llm-wiki'))
+  check('恒定层不含会话事实（路径/概念计数）', section
+    && !section.text.includes(tmp)
+    && !/\d+ concepts/.test(section.text)
+    && !/共 \d+ 个概念/.test(section.text), section && section.text.slice(0, 160))
+  check('会话层快照含数据源路径', context && context.text.includes(tmp), (context && context.text.slice(0, 160)) || 'no context')
+  check('会话层不含概念计数（高频 churn 源已移出）', context
+    && !/\d+ concepts/.test(context.text)
+    && !/共 \d+ 个概念/.test(context.text), context && context.text.slice(0, 200))
 
   // 执行关键工具
   const list = await tools.get('wiki_list').execute({})
@@ -85,6 +94,15 @@ async function main() {
   const fileText = await readFile(join(tmp, 'tables', 'probe_x.md'), 'utf8')
   check('创建文件含 verified human', fileText.includes('verified') && fileText.includes('tester'))
 
+  // 写入不 churn：概念计数已移出注入 → 恒定层与会话层都逐字节不变（前缀缓存前提）
+  const assemblyAfterWrite = { sections: [], contexts: [] }
+  await handlers['system-prompt/assemble'](assemblyAfterWrite, {}, async () => {})
+  const sectionAfterWrite = assemblyAfterWrite.sections.find((s) => s.name === 'wiki-registry')
+  const contextAfterWrite = assemblyAfterWrite.contexts.find((c) => c.name === 'wiki-registry:bundle')
+  check('写入后恒定层逐字节不变', sectionAfterWrite && sectionAfterWrite.text === section.text)
+  check('写入后会话层逐字节不变（无计数 churn）', contextAfterWrite && contextAfterWrite.text === context.text,
+    `\n  before=${JSON.stringify((context && context.text || '').slice(0, 120))}\n  after =${JSON.stringify((contextAfterWrite && contextAfterWrite.text || '').slice(0, 120))}`)
+
   // wiki_help：机制文档自助查询
   const helpAppend = await tools.get('wiki_help').execute({ topic: 'append' })
   check('wiki_help append 讲清注入文件写法', /APPEND_SYSTEM_PROMPT/.test(helpAppend.text) && /正文/.test(helpAppend.text), helpAppend.text.slice(0, 120))
@@ -108,11 +126,13 @@ async function main() {
   check('其他对话不受会话切换影响', !listB.text.includes('marker'), listB.text.slice(0, 200))
   const dirsA = await tools.get('wiki_dirs').execute({}, { agent: agentA })
   check('wiki_dirs 标记当前会话', /当前会话/.test(dirsA.text), dirsA.text.slice(0, 300))
-  // 描述层跟随会话切换：wiki_use 后 assemble（同一 agent）数据源指向 other
-  const assembly2 = { sections: [] }
+  // 注入跟随会话切换：wiki_use 后会话层指向 other，恒定层保持逐字节不变
+  const assembly2 = { sections: [], contexts: [] }
   await handlers['system-prompt/assemble'](assembly2, { agent: agentA }, async () => {})
   const sec2 = assembly2.sections.find((s) => s.name === 'wiki-registry')
-  check('描述层跟随会话切换', sec2 && sec2.text.includes(tmp2), (sec2 && sec2.text.slice(0, 120)) || 'no section')
+  const ctx2 = assembly2.contexts.find((c) => c.name === 'wiki-registry:bundle')
+  check('会话层跟随会话切换', ctx2 && ctx2.text.includes(tmp2), (ctx2 && ctx2.text.slice(0, 120)) || 'no context')
+  check('切换分支不改动恒定层（跨分支逐字节相同）', sec2 && sec2.text === section.text)
   // 全局持久：无 agent 调用 + global:true → 写注册表；新 agent 默认跟随
   const useGlobal = await tools.get('wiki_use').execute({ name: 'other', global: true }, { agent: agentB })
   check('wiki_use 全局持久', /全局默认/.test(useGlobal.text), useGlobal.text)

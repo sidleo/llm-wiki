@@ -6,7 +6,10 @@
 #   dsh plugin --profile <name> add link:/path/to/packages/dsh
 #
 # Row is a bare plugin by npm package name: the node half (exports ".")
-# runs in the host process (描述层注入 + wiki_* 工具)。
+# runs in the host process (注入分层 + wiki_* 工具)。
+# 注入分两层：恒定层 section（恒定文本，不随会话/分支变化）+ 会话层 runtime context 快照
+# （bundle 路径/目录清单/APPEND_SYSTEM_PROMPT 规则，追加在会话尾部）。易变内容不进 system
+# prompt，否则一字节变化就打断整段前缀缓存；概念计数不进注入，清单用 wiki_list/wiki_dirs。
 # 数据目录默认 ~/.agents/wiki（wiki.mjs 内以 os.homedir() 计算）；覆盖用 id 定向补丁：
 #   - id: wiki-registry
 #     config:
@@ -14,6 +17,8 @@
 #       sectionName: wiki-registry
 #       sectionOrder: 62
 #       maxSectionChars: 6000
+#       contextOrder: 130
+#       maxContextChars: 12000
 # 多目录（命名 bundle）：config.dataDirs 声明，与注册表 ~/.agents/wiki-registry.json 合并
 # （同名配置优先）；wiki_dirs 查看，wiki_use <name> [global:true] 切换（会话级/持久化全局默认）。
 # 详见 wiki_help bundle。
@@ -28,5 +33,7 @@
         sectionName: wiki-registry
         sectionOrder: 62
         maxSectionChars: 6000
+        contextOrder: 130
+        maxContextChars: 12000
         maxGetChars: 40000
         cacheTtlMs: 30000
