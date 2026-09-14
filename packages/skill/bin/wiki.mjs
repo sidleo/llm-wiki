@@ -15,6 +15,9 @@
  *   wiki rules DIR [--dataDir DIR]
  *   wiki dirs [--dataDir DIR]
  *   wiki use NAME [--global] [--dataDir DIR]
+ *   wiki sync [status] [--message M] [--dataDir DIR] [--wiki NAME]
+ *   wiki sync init --remote URL [--branch B] [--name N] [--use]
+ *   wiki sync clone URL DIR [--name N] [--use]
  *
  * 环境变量 WIKI_DATA_DIR 可覆盖默认数据目录 ~/.agents/wiki。
  * 多目录（命名 bundle）：注册表 ~/.agents/wiki-registry.json（env WIKI_REGISTRY_FILE 覆盖）；
@@ -97,6 +100,39 @@ function bodyFrom(p) {
     }
   }
   return p
+}
+
+/** wiki sync 结果文本化（与 DSH/pi 形态语义一致）。 */
+function printSync(action, r) {
+  if (action === 'status') {
+    if (!r.ok) {
+      console.log(`同步状态：不可用\n- ${r.error}${r.next ? `\n- 下一步：${r.next}` : ''}`)
+      return
+    }
+    console.log(`同步状态：${r.remote || '(未配置远端)'}`)
+    console.log(`- 分支：${r.branch || '(detached)'}${r.upstream ? ` → ${r.upstream}` : '（未设 upstream）'}`)
+    console.log(`- 领先 ${r.ahead} / 落后 ${r.behind}`)
+    console.log(`- 工作区改动：${r.dirty.length} 个文件`)
+    if (r.conflicts.length) console.log(`- 冲突：${r.conflicts.join('、')}`)
+    console.log(`- 最后提交：${r.lastCommit || '(无)'}`)
+    return
+  }
+  if (r.ok) {
+    if (action === 'clone') {
+      console.log(`已克隆：${r.dir}${r.registered ? `（注册为「${r.registered}」）` : ''}`)
+    } else {
+      console.log(`${action === 'init' ? '初始化完成' : '同步完成'}${r.bundle ? `：${r.bundle.name ? `${r.bundle.name} → ` : ''}${r.bundle.path}` : ''}`)
+      if (r.committed) console.log(`- 本地提交：${r.committed} 个文件`)
+      if (r.merged) console.log('- 已合并远端变更')
+      if (r.pushed) console.log('- 已推送')
+      if (r.status) console.log(`- 现在：领先 ${r.status.ahead} / 落后 ${r.status.behind}`)
+    }
+    for (const s of r.steps || []) console.log(`  · ${s}`)
+    return
+  }
+  console.error(`${action === 'init' ? '初始化' : '同步'}失败（${r.step || 'unknown'}）：${r.error || '未知错误'}`)
+  if (r.conflicts && r.conflicts.length) console.error(`- 冲突文件：${r.conflicts.join('、')}`)
+  if (r.next) console.error(`- 下一步：${r.next}`)
 }
 
 async function main() {
@@ -226,6 +262,43 @@ async function main() {
       }
       break
     }
+    case 'sync': {
+      const pos = positional(rest)
+      const sub = ['status', 'sync', 'init', 'clone'].includes(pos[0]) ? pos[0] : 'sync'
+      if (sub === 'clone') {
+        const url = pos[1] || arg(rest, '--url')
+        const dir = pos[2] || arg(rest, '--dir')
+        if (!url || !dir) {
+          console.error('usage: wiki sync clone <URL> <DIR> [--name N] [--use]')
+          process.exit(1)
+        }
+        const r = await core.gitClone(url, dir, { name: arg(rest, '--name'), use: has(rest, '--use') })
+        printSync('clone', r)
+        if (!r.ok) process.exit(1)
+        break
+      }
+      if (sub === 'init') {
+        const r = await core.gitInit(dataDir, {
+          remote: arg(rest, '--remote'),
+          branch: arg(rest, '--branch'),
+          name: arg(rest, '--name'),
+          use: has(rest, '--use'),
+        })
+        printSync('init', { ...r, bundle: { name: '', path: dataDir } })
+        if (!r.ok) process.exit(1)
+        break
+      }
+      if (sub === 'status') {
+        const r = await core.gitStatus(dataDir)
+        printSync('status', r)
+        if (!r.ok) process.exit(1)
+        break
+      }
+      const r = await core.gitSync(dataDir, { message: arg(rest, '--message') })
+      printSync('sync', { ...r, bundle: { name: '', path: dataDir } })
+      if (!r.ok) process.exit(1)
+      break
+    }
     case 'index': {
       const dir = positional(rest).join(' ') || ''
       await core.updateIndex(dataDir, { dirs: [dir] })
@@ -258,8 +331,9 @@ async function main() {
     }
     default:
       console.log(`wiki CLI — llm-wiki core 工具
-用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|index|dirs|use|help> [args] [--dataDir DIR] [--wiki NAME]
-主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle]`)
+用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|index|dirs|use|sync|help> [args] [--dataDir DIR] [--wiki NAME]
+       wiki sync [status] | wiki sync init --remote URL | wiki sync clone URL DIR [--name N] [--use]
+主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle|sync]`)
       process.exit(cmd ? 1 : 0)
   }
 }

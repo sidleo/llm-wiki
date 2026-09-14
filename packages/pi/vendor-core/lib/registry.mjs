@@ -67,6 +67,25 @@ export async function writeRegistryActive(name) {
   return writeRegistry({ active: name })
 }
 
+/**
+ * 从注册表移除一个命名 bundle（只动注册表，不删磁盘数据）。
+ * 被移除的是全局默认时，active 置空（下次解析回落到 default）。
+ * @returns {Promise<{removed:boolean, active:string|null}>}
+ */
+export async function removeBundle(name) {
+  const cur = await readRegistry()
+  if (!Object.prototype.hasOwnProperty.call(cur.bundles, name)) return { removed: false, active: cur.active }
+  const bundles = { ...cur.bundles }
+  delete bundles[name]
+  const next = { bundles, active: cur.active === name ? null : cur.active }
+  const file = registryFile()
+  await mkdir(dirname(file), { recursive: true })
+  const tmp = file + '.tmp'
+  await writeFile(tmp, JSON.stringify(next, null, 2) + '\n', 'utf8')
+  await rename(tmp, file)
+  return { removed: true, active: next.active }
+}
+
 /** 有效 bundle 表（name → 绝对路径）：注册表 ∪ 宿主 config.dataDirs（同名 config 优先）。 */
 export async function effectiveBundles(config = {}) {
   const reg = await readRegistry()

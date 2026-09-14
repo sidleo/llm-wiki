@@ -18,6 +18,8 @@
 - **生命周期**——`stale_after` 过期、`status: deprecated`（概念级）与目录级批量停用、自动维护 `index.md` / `log.md`。
 - **校验与体检**——`wiki_validate`（OKF 合规）与 `wiki_lint`（断链、孤儿页、过期、缺 index）。
 - **多目录（命名 bundle）**——注册多个 wiki 目录为命名分支，可切换（会话级或全局持久）。
+- **在线知识库（Git 远端同步）**——bundle 仍是本地 Markdown 目录树，挂上远端即可多机/多人/多个 agent 读写同一份：`wiki_sync`（或 `wiki sync`）提交→拉取合并→推送。`index.md` 自动重生成、`log.md` 取并集（并发写入不阻塞）；概念冲突会停止并报清单，工作区回滚到同步前，**绝不 force push**。
+- **图形化配置（DSH Web GUI）**——设置 → 插件 → 插件配置里的 llm-wiki 卡片：命名目录增删/改名/设默认、在线同步状态与一键同步/初始化/克隆、体检（validate/lint 计数 + 重建 index）。运行参数属部署级配置（profile 的 `cordis.patch.yml`），卡片刻意不提供编辑。
 
 ## Wiki 目录结构（bundle）
 
@@ -68,9 +70,37 @@ llm-wiki/
 
 三形态读写**同一份 bundle**、行为一致——都复用 `packages/core`，无重复实现。
 
-## 工具（13 个）
+## 工具（14 个）
 
-`wiki_list` · `wiki_search` · `wiki_get`（附 backlinks）· `wiki_create` · `wiki_update` · `wiki_validate` · `wiki_lint` · `wiki_ingest` · `wiki_deprecate` · `wiki_rules` · `wiki_help` · `wiki_dirs` · `wiki_use`
+`wiki_list` · `wiki_search` · `wiki_get`（附 backlinks）· `wiki_create` · `wiki_update` · `wiki_validate` · `wiki_lint` · `wiki_ingest` · `wiki_deprecate` · `wiki_rules` · `wiki_help` · `wiki_dirs` · `wiki_use` · `wiki_sync`
+
+### 在线知识库（Git 远端同步）
+
+```bash
+# 已有本地 bundle：挂远端并首推（--name 同时注册为命名目录）
+wiki sync init --remote git@host:group/wiki.git --name 团队库 --use
+
+# 新机器：克隆并注册
+wiki sync clone git@host:group/wiki.git ~/Documents/llm-wiki --name 团队库 --use
+
+# 日常：先看状态，再同步（提交本地改动 → 拉取合并 → 推送）
+wiki sync status
+wiki sync --message "永辉口径补充"
+```
+
+冲突策略：`index.md`（派生文件）同步时按目录树重新生成；`log.md`（追加式）按日期块取并集；概念 / `AGENTS.md` / `APPEND_SYSTEM_PROMPT.md` 属人工撰写内容，冲突时同步停止、报冲突清单并把工作区恢复到同步前（本地提交保留），人工解决后重跑即可。凭证交给 git（SSH agent / credential helper），本工具不保存 token，也绝不 force push。详见 `wiki help sync`。
+
+### 图形化配置（DSH Web GUI）
+
+设置 → 插件 → 插件配置 → llm-wiki 卡片（ADR：宿主按「已服务设置命名空间 ∩ 已注册卡片」渲染，卡片 key = `dsh-wiki`）：
+
+| 区块 | 能改什么 | 落到哪 |
+|------|----------|--------|
+| 命名目录 | 增删/改名/设默认 | `~/.agents/wiki-registry.json`（与 CLI/pi 共享，删除只摘注册不动数据） |
+| 在线同步 | 远端/分支/领先落后/冲突 + 同步/初始化/克隆 | 走 core `git.mjs`，与 `wiki_sync` 同一实现 |
+| 体检与索引 | validate/lint 计数与明细、重建 index | core `validateBundle`/`lintBundle`/`refreshIndex` |
+
+（运行参数不在卡片里：数据目录、注入 section 名/order、各上限、缓存 TTL 都是部署级配置，改 profile 的 `cordis.patch.yml`。）
 
 ## 多目录（命名 bundle）
 
@@ -115,7 +145,10 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 
 ```bash
 node scripts/smoke-test.mjs              # 36 项：core 工具链 + 注册表 + ingest/lint 端到端
-node tests/dsh-mock-test.mjs             # 31 项：DSH 插件（mock 宿主）工具注册 + 注入分层 + 门控 + 多目录
+node tests/dsh-mock-test.mjs             # 33 项：DSH 插件（mock 宿主）工具注册 + 注入分层 + 门控 + 多目录 + 同步诊断
+node --test tests/dsh-config-test.mjs    # 9 项：配置卡片宿主半（设置命名空间 + /api/dsh-wiki/* 路由）
+node --test tests/git-sync.test.mjs      # 8 项：Git 远端同步（顺序写/并发 log/index 冲突/概念冲突/错误路径）
+node --test tests/dsh-client-bundle-test.mjs   # 5 项：卡片产物契约 + jsdom 渲染冒烟
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 项：pi 扩展（mock pi）
 node --test tests/three-forms.test.mjs   # 5 项：三形态读写同一 bundle 一致性
 ```

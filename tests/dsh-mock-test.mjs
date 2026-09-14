@@ -2,8 +2,8 @@
  * tests/dsh-mock-test.mjs —— DSH 插件宿主无关验证（mock ctx）。
  *
  * 不依赖真实 dsh web 运行时：构造最小 ctx（on/工具注册表），
- * 验证 apply 注册 13 个工具、注入分层（恒定层 section + 会话层 runtime context）、
- * 关键工具可执行、多目录 wiki_dirs/wiki_use（会话级切换 + 全局持久）。
+ * 验证 apply 注册 14 个工具、注入分层（恒定层 section + 会话层 runtime context）、
+ * 关键工具可执行、多目录 wiki_dirs/wiki_use（会话级切换 + 全局持久）与 wiki_sync。
  */
 
 import { mkdtemp, rm, cp, readFile, writeFile } from 'node:fs/promises'
@@ -40,6 +40,8 @@ async function main() {
       register(t) { tools.set(t.name, t) },
     },
     systemPrompt: {},
+    // 可选服务（settings / webServer）缺席：应静默降级，不影响工具与注入
+    inject(_deps, cb) { return cb({ get() { return undefined } }) },
   }
 
   const assembly = { sections: [], contexts: [] }
@@ -48,8 +50,8 @@ async function main() {
 
   check('插件名 wiki-registry', plugin.name === 'wiki-registry')
   check('依赖 systemPrompt/tools', plugin.inject.join(',') === 'systemPrompt,tools')
-  const expected = ['wiki_list', 'wiki_search', 'wiki_get', 'wiki_create', 'wiki_update', 'wiki_validate', 'wiki_lint', 'wiki_ingest', 'wiki_deprecate', 'wiki_rules', 'wiki_help', 'wiki_dirs', 'wiki_use']
-  check('注册 13 个工具', expected.every((n) => tools.has(n)) && tools.size === 13, `got ${tools.size}`)
+  const expected = ['wiki_list', 'wiki_search', 'wiki_get', 'wiki_create', 'wiki_update', 'wiki_validate', 'wiki_lint', 'wiki_ingest', 'wiki_deprecate', 'wiki_rules', 'wiki_help', 'wiki_dirs', 'wiki_use', 'wiki_sync']
+  check('注册 14 个工具', expected.every((n) => tools.has(n)) && tools.size === 14, `got ${tools.size}`)
 
   // 注入分层：恒定层 = system prompt section；会话层 = runtime context 快照
   await handlers['system-prompt/assemble'](assembly, {}, async () => {})
@@ -141,6 +143,12 @@ async function main() {
   check('新对话默认跟随注册表 active', listC.text.includes('marker'), listC.text.slice(0, 200))
   const dirsAfter = await tools.get('wiki_dirs').execute({}, { agent: agentC })
   check('wiki_dirs 全局默认移到 other', /\[other\].*全局默认/.test(dirsAfter.text.replace(/\n/g, ' ')), dirsAfter.text.slice(0, 300))
+
+  // wiki_sync：无远端/非仓库时给可执行指引（只读诊断，不改动任何仓库）
+  const syncStatus = await tools.get('wiki_sync').execute({ action: 'status' }, { agent: agentA })
+  check('wiki_sync status 给可执行指引', /同步状态/.test(syncStatus.text) && !/错误：/.test(syncStatus.text), syncStatus.text.slice(0, 200))
+  const syncHelp = await tools.get('wiki_help').execute({ topic: 'sync' })
+  check('wiki_help sync 讲清冲突策略', /log\.md/.test(syncHelp.text) && /force/.test(syncHelp.text), syncHelp.text.slice(0, 120))
 
   if (prevReg === undefined) delete process.env.WIKI_REGISTRY_FILE
   else process.env.WIKI_REGISTRY_FILE = prevReg

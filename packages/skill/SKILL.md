@@ -29,6 +29,7 @@ metadata:
 - 用户提到「知识库」「表口径」「这个表怎么查」「踩过的坑」等，且存在 `~/.agents/wiki`（或 `WIKI_DATA_DIR`）bundle
 - 需要把新的源资料/经验写入知识库（create / ingest）
 - 需要体检知识库（validate / lint）或停用整块知识（deprecate）
+- 需要多机/多人共享同一份知识库（`wiki sync`，Git 远端：index.md 自动重生成、log.md 取并集，概念冲突需人工合并）
 
 ## 2. 前置条件
 
@@ -61,7 +62,10 @@ metadata:
 | `wiki deprecate DIR` | 目录级批量标 `status: deprecated` |
 | `wiki rules DIR` | 查看该目录生效的 AGENTS.md 规则（含向上遍历结果） |
 | `wiki index [DIR]` | 重生成目录 index.md（写操作已自动维护，手工修复时用） |
-| `wiki help [主题]` | 查机制文档：quickstart｜files｜agents（怎么写 AGENTS.md）｜append（怎么写 APPEND_SYSTEM_PROMPT.md）｜frontmatter｜gate |
+| `wiki sync [status]` | 在线知识库：`status` 看远端/分支/领先落后/冲突；无参数则提交+拉取合并+推送（不 force） |
+| `wiki sync init --remote URL [--name N] [--use]` | 给本地 bundle 挂 Git 远端并首推（可同时注册命名 bundle） |
+| `wiki sync clone URL DIR [--name N] [--use]` | 克隆远端知识库到本地并注册（多机/多人共享同一份） |
+| `wiki help [主题]` | 查机制文档：quickstart｜files｜agents（怎么写 AGENTS.md）｜append（怎么写 APPEND_SYSTEM_PROMPT.md）｜frontmatter｜gate｜bundle｜sync（在线同步与冲突策略） |
 
 想给某分类加行为规则 → 在该目录新建 `APPEND_SYSTEM_PROMPT.md`（正文即追加进 system prompt 的行为引导，写法见 `wiki help append`）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节（写法见 `wiki help agents`）。
 

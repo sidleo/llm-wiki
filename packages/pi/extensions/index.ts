@@ -2,7 +2,7 @@
  * pi-wiki — Pi 扩展（llm-wiki 通用知识库，OKF v0.2）。
  *
  * 复用 @sidleo3/llm-wiki-core 的全部逻辑（与 DSH 插件 / skill CLI 同一实现），
- * 注册 13 个 wiki_* 工具 + prompt 引导。数据目录默认 ~/.agents/wiki，
+ * 注册 14 个 wiki_* 工具 + prompt 引导。数据目录默认 ~/.agents/wiki，
  * 环境变量 PI_WIKI_DATA_DIR 覆盖；多目录用命名 bundle（注册表
  * ~/.agents/wiki-registry.json，env WIKI_REGISTRY_FILE 覆盖），wiki_use 切换
  * 全局默认（pi 无会话态，无 DSH 的 per-agent 会话级切换）。
@@ -36,6 +36,7 @@ const WIKI_GUIDELINES = [
   "wiki_get 自动附 backlinks（引用它的概念/坑点）。写入前先 wiki_rules <目录> 看 AGENTS.md 门控。",
   "主动知识记录行为由各分类目录 APPEND_SYSTEM_PROMPT.md 决定：做某分类工作前若该目录（含祖先）有该文件，其正文即追加行为规则，照做。",
   "frontmatter 只用 OKF 字段，不引入自定义字段；断链 = 未写入知识，lint 归集，不必修。",
+  "在线知识库用 wiki_sync：status 看远端/领先落后/冲突，sync 提交+拉取合并+推送（概念冲突会停止并报清单，index.md 自动重生成、log.md 取并集）；绝不 force push。",
 ].join("\n");
 
 const textOut = { text: Type.String() };
@@ -402,7 +403,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
     description: "查 llm-wiki 机制文档：保留文件一览 / 怎么写目录 AGENTS.md / 怎么写 APPEND_SYSTEM_PROMPT.md（分类行为注入）/ OKF frontmatter 速查 / 门控判定逻辑。想给分类加行为规则或门控时先查它。",
     promptSnippet: "机制文档：查保留文件/AGENTS/APPEND 写法",
     promptGuidelines: guidelines(),
-    parameters: Type.Object({ topic: Type.Optional(Type.String({ description: "主题：quickstart | files | agents | append | frontmatter | gate（缺省 quickstart）" })) }),
+    parameters: Type.Object({ topic: Type.Optional(Type.String({ description: "主题：quickstart | files | agents | append | frontmatter | gate | bundle | sync（缺省 quickstart）" })) }),
     async execute(_id, params) {
       try {
         const core = await loadCore();
@@ -412,10 +413,74 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
       }
     },
   });
+
+  // wiki_sync —— 在线知识库（Git 远端同步），与 DSH 形态同一 core 实现
+  pi.registerTool({
+    name: "wiki_sync",
+    label: "Wiki Sync",
+    description: "在线知识库（Git 远端同步）：status 只读看远端/分支/领先落后/冲突；sync 提交本地改动+拉取合并+推送；init 给本地 bundle 挂远端并首推；clone 克隆远端为本地 bundle。index.md 自动重生成、log.md 取并集，概念冲突会停止同步并报清单（不 force push）。",
+    promptSnippet: "在线知识库：Git 远端同步（status/sync/init/clone）",
+    promptGuidelines: guidelines(),
+    parameters: Type.Object({
+      action: Type.String({ description: "status | sync | init | clone", enum: ["status", "sync", "init", "clone"] }),
+      message: Type.Optional(Type.String({ description: "sync 时的提交信息" })),
+      remote: Type.Optional(Type.String({ description: "init：远端 URL" })),
+      url: Type.Optional(Type.String({ description: "clone：远端 URL" })),
+      dir: Type.Optional(Type.String({ description: "clone：本地目标目录" })),
+      name: Type.Optional(Type.String({ description: "init/clone：同时注册为命名 bundle" })),
+      use: Type.Optional(Type.Boolean({ description: "init/clone：注册后设为全局默认" })),
+      branch: Type.Optional(Type.String({ description: "init：初始分支名（缺省 main）" })),
+    }),
+    async execute(_id, params) {
+      try {
+        const core = await loadCore();
+        const action = String(params.action || "");
+        const resolved = await core.resolveBundleRoot(config, {});
+        if (action === "clone") {
+          if (!params.url || !params.dir) return ok("clone 需要 url 与 dir 参数。");
+          return ok(formatGit(action, await core.gitClone(params.url, params.dir, { name: params.name, use: params.use === true })));
+        }
+        if (action === "status") return ok(formatGit(action, await core.gitStatus(resolved.path)));
+        if (action === "sync") return ok(formatGit(action, { ...(await core.gitSync(resolved.path, { message: params.message })), bundle: resolved }));
+        if (action === "init") return ok(formatGit(action, { ...(await core.gitInit(resolved.path, { remote: params.remote, branch: params.branch, name: params.name, use: params.use === true })), bundle: resolved }));
+        return ok(`未知 action「${params.action}」：可用 status | sync | init | clone。`);
+      } catch (e) {
+        return err(e);
+      }
+    },
+  });
+}
+
+/** wiki_sync 结果文本化（与 DSH 形态语义一致）。 */
+function formatGit(action: string, r: any): string {
+  if (action === "status") {
+    if (!r.ok) return `同步状态：不可用\n- ${r.error}${r.next ? `\n- 下一步：${r.next}` : ""}`;
+    return [
+      `同步状态：${r.remote || "(未配置远端)"}`,
+      `- 分支：${r.branch || "(detached)"}${r.upstream ? ` → ${r.upstream}` : "（未设 upstream）"}`,
+      `- 领先 ${r.ahead} / 落后 ${r.behind}`,
+      `- 工作区改动：${r.dirty.length} 个文件`,
+      r.conflicts.length ? `- 冲突：${r.conflicts.join("、")}` : "",
+      `- 最后提交：${r.lastCommit || "(无)"}`,
+    ].filter(Boolean).join("\n");
+  }
+  if (r.ok) {
+    if (action === "clone") return `已克隆：${r.dir}${r.registered ? `（注册为「${r.registered}」）` : ""}`;
+    const lines = [`${action === "init" ? "初始化完成" : "同步完成"}${r.bundle ? `：${r.bundle.name} → ${r.bundle.path}` : ""}`];
+    if (r.committed) lines.push(`- 本地提交：${r.committed} 个文件`);
+    if (r.merged) lines.push("- 已合并远端变更");
+    if (r.pushed) lines.push("- 已推送");
+    if (r.status) lines.push(`- 现在：领先 ${r.status.ahead} / 落后 ${r.status.behind}`);
+    return lines.join("\n");
+  }
+  const lines = [`${action === "init" ? "初始化" : "同步"}失败（${r.step || "unknown"}）：${r.error || "未知错误"}`];
+  if (r.conflicts && r.conflicts.length) lines.push(`- 冲突文件：${r.conflicts.join("、")}`);
+  if (r.next) lines.push(`- 下一步：${r.next}`);
+  return lines.join("\n");
 }
 
 /**
- * Pi 扩展默认导出：注册 13 个 wiki_* 工具。
+ * Pi 扩展默认导出：注册 14 个 wiki_* 工具。
  * 数据目录默认 ~/.agents/wiki，环境变量 PI_WIKI_DATA_DIR 覆盖；多目录用命名
  * bundle（注册表 ~/.agents/wiki-registry.json），wiki_use 切换全局默认。
  *

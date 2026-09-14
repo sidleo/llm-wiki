@@ -65,6 +65,8 @@ describe("three forms consistency", () => {
     const ctx = {
       on(evt, fn) { if (evt === "system-prompt/assemble") handlers.push(fn); },
       tools: { register(t) { tools.set(t.name, t); } },
+      // 可选服务（settings/webServer）缺席：插件应静默降级
+      inject(_deps, cb) { cb({ get() { return undefined; } }); },
     };
     dshMod.apply(ctx, { dataDir: tmpDir });
     await handlers[0](assembly, {}, async () => {});
@@ -93,6 +95,8 @@ describe("three forms consistency", () => {
     const ctx = {
       on(evt, fn) { if (evt === "system-prompt/assemble") handlers.push(fn); },
       tools: { register(t) { tools.set(t.name, t); } },
+      // 可选服务（settings/webServer）缺席：插件应静默降级
+      inject(_deps, cb) { cb({ get() { return undefined; } }); },
     };
     dshMod.apply(ctx, {});
     const got = await tools.get("wiki_get").execute({ id: "tables/three_probe" });

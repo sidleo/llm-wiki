@@ -6,7 +6,7 @@
  * 不依赖猜测。内容随本项目规范版本走（SPEC-EXTENSIONS.md 的执行摘要）。
  */
 
-export const HELP_TOPICS = ['quickstart', 'files', 'agents', 'append', 'frontmatter', 'gate', 'bundle']
+export const HELP_TOPICS = ['quickstart', 'files', 'agents', 'append', 'frontmatter', 'gate', 'bundle', 'sync']
 
 function doc(title, body) {
   return `# ${title}\n\n${body.trim()}\n`
@@ -26,7 +26,7 @@ const SECTIONS = {
 5. 写入：wiki_create / wiki_update；停用：wiki_deprecate；查规则：wiki_rules
 6. 多目录：wiki_dirs 查看分支，wiki_use <name> [global: true] 切换
 
-更多主题：wiki help files | agents | append | frontmatter | gate | bundle`,
+更多主题：wiki help files | agents | append | frontmatter | gate | bundle | sync`,
   ),
 
   files: doc(
@@ -142,16 +142,53 @@ computation（计算文件路径，缺省用正文 # Computation 代码块）、
 
 切换：
 - wiki_dirs —— 查看全部 bundle 与当前激活项
+- DSH Web GUI：设置 → 插件 → 插件配置 → llm-wiki 卡片（命名目录增删改名/设默认、在线同步、
+  体检与索引）——与 CLI/pi 共用同一份注册表；运行参数是部署级配置，改 profile 的 cordis.patch.yml
 - wiki_use <name> [global: true] —— 会话级切换（DSH 按对话隔离，仅当前对话生效）；
   global: true 同时持久化为全局默认（写注册表 active，影响新会话与其他宿主）
 - CLI：wiki dirs 查看 / wiki use NAME [--global] 切换；每条命令可 --wiki NAME 指定
 
 解析顺序（无显式 name）：注册表 active（若为已知名字）→ default。`,
   ),
+
+  sync: doc(
+    '在线知识库（Git 远端同步）',
+    `
+bundle 仍是本地 markdown 目录树，远端同步让多台机器 / 多人 / 多个 agent 读写同一份知识库。
+
+## 起步（二选一）
+
+- 已有本地 bundle：在 bundle 根执行 wiki sync init --remote <仓库URL> [--name 名字] [--use]
+  （git init + 最小 .gitignore + 首次提交 + push -u；--name 同时注册为命名 bundle）
+- 还没有本地目录：wiki sync clone <仓库URL> <目录> [--name 名字] [--use]
+  （clone 后注册命名 bundle，三形态共享同一注册表）
+
+## 日常
+
+- wiki sync status —— 只读：远端 / 分支 / ahead-behind / 脏文件 / 冲突 / 最后提交
+- wiki sync [--message M] —— 提交本地改动 → fetch → 合并远端 → push（不 force）
+
+## 冲突策略（关键）
+
+- index.md：派生文件，同步时用 core 从合并后的目录树**重新生成**，永不阻塞。
+- log.md：追加式且格式自有，冲突按「日期块 + 条目行」取并集去重，永不阻塞。
+- 概念 / AGENTS.md / APPEND_SYSTEM_PROMPT.md：人工撰写的知识，**不自动合并**。
+  此时同步会 merge --abort 并报冲突清单，工作区回到同步前状态（本地提交保留），
+  人工解决后重跑即可。
+
+## 安全边界
+
+- 绝不 push --force、绝不 reset --hard、绝不代你 abort 进行中的 merge/rebase。
+- bundle 必须是 git 仓库顶层；bundle 位于更大仓库子目录时直接拒绝（防止误提交他处文件）。
+- 凭证完全交给 git（SSH agent / credential helper）；本项目不存储任何 token。
+- 无交互执行：GIT_TERMINAL_PROMPT=0 + BatchMode，凭证缺失立即失败并透出 git 报错。
+- 远端配置只存在 git 自己（.git/config）；知识库格式层零新增字段。
+- 浏览器浏览直接用托管平台（GitHub/GitLab/Gitea）的 markdown 渲染，不另起服务。`,
+  ),
 }
 
 /**
- * @param {string} topic quickstart|files|agents|append|frontmatter|gate（大小写不敏感；缺省 quickstart）
+ * @param {string} topic quickstart|files|agents|append|frontmatter|gate|bundle|sync（大小写不敏感；缺省 quickstart）
  */
 export function getHelp(topic) {
   const t = String(topic || 'quickstart').trim().toLowerCase()

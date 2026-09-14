@@ -1,16 +1,22 @@
 {
   "name": "@sidleo3/dsh-wiki",
-  "version": "0.2.1",
-  "description": "DSH plugin for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle with progressive disclosure. Registers 13 tools: wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules/help/dirs/use. Named multi-bundle directories with session/global switching. Self-contained (vendor-core embedded).",
+  "version": "0.3.0",
+  "description": "DSH plugin for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle with progressive disclosure. Registers 14 tools: wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules/help/dirs/use/sync. Named multi-bundle directories with session/global switching, Git remote sync (online knowledge base), and a Settings → Plugins → Plugin configuration card (bundle registry / runtime params / sync / health). Self-contained (vendor-core embedded).",
   "type": "module",
   "main": "wiki.mjs",
   "exports": {
     ".": "./wiki.mjs",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "wiki.mjs",
     "vendor-core/",
+    "lib/client.js",
+    "lib/client.js.map",
+    "src/",
+    "tsdown.config.ts",
+    "tsconfig.json",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
@@ -19,12 +25,39 @@
     "node": ">=18.0.0"
   },
   "dsh": {
+    "engines": {
+      "dsh": ">=0.1.5-rc.1"
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
     }
+  },
+  "dependencies": {
+    "schemastery": "^3.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "@types/react": "^18.3.1",
+    "jsdom": "^25.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "0.22.2",
+    "typescript": "~5.7.2"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
   },
   "license": "MIT",
   "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build",
     "sync-vendor": "node scripts/sync-vendor.mjs"
   }
 }

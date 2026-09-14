@@ -8,7 +8,7 @@
  * 维护策略：写操作后刷新「受影响目录 + 根」两处 index（可配置关闭）。
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { buildGraph } from './bundle.mjs'
 import { splitFrontmatter } from './doc.mjs'
@@ -110,6 +110,86 @@ export async function updateIndex(root, { dirs = [], okfVersion } = {}) {
   for (const d of new Set(dirs.filter(Boolean))) {
     await writeDirIndex(root, d)
   }
+}
+
+/**
+ * 重生成全部 index.md：根 + 所有「已有 index.md 或含概念」的目录。
+ * index 是派生文件——从目录树重新生成，结果是严格正确的。
+ * @returns {Promise<{files: string[]}>} 写出的 bundle 相对路径列表
+ */
+export async function refreshIndex(root) {
+  const graph = await buildGraph(root)
+  const dirs = new Set()
+  for (const [id] of graph.nodes) {
+    const d = dirname(id).replace(/\\/g, '/')
+    if (d !== '.') dirs.add(d)
+  }
+  async function walk(rel) {
+    let entries
+    try {
+      entries = await readdir(join(root, rel), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) await walk(r)
+      else if (e.name === 'index.md' && rel) dirs.add(rel)
+    }
+  }
+  await walk('')
+  await updateIndex(root, { dirs: [...dirs] })
+  return { files: ['index.md', ...[...dirs].sort().map((d) => `${d}/index.md`)] }
+}
+
+/**
+ * 合并两侧 log.md 文本（git 冲突时用）。
+ *
+ * log.md 是追加式、格式自有：按「## YYYY-MM-DD」分块，块内条目行取并集去重；
+ * 日期块顺序保持「先出现的在前」，对方独有日期追加在后——不改动既有排版，
+ * 且不丢任何一侧条目。产出与 appendLog 兼容。
+ */
+export function mergeLogText(ours, theirs) {
+  const parse = (text) => {
+    const order = []
+    const map = new Map()
+    const preamble = []
+    let cur = null
+    for (const line of String(text || '').split('\n')) {
+      const h = /^##\s+(\S+)\s*$/.exec(line)
+      if (h) {
+        cur = h[1]
+        if (!map.has(cur)) {
+          map.set(cur, [])
+          order.push(cur)
+        }
+        continue
+      }
+      if (!line.trim()) continue
+      if (cur === null) preamble.push(line.trim())
+      else map.get(cur).push(line.trim())
+    }
+    return { order, map, preamble }
+  }
+  const a = parse(ours)
+  const b = parse(theirs)
+  const dates = [...a.order, ...b.order.filter((d) => !a.map.has(d))]
+  const lines = []
+  const pre = a.preamble.length ? a.preamble : b.preamble
+  for (const p of pre) if (!lines.includes(p)) lines.push(p)
+  if (pre.length) lines.push('')
+  for (const d of dates) {
+    const seen = new Set()
+    const entries = []
+    for (const e of [...(a.map.get(d) || []), ...(b.map.get(d) || [])]) {
+      if (seen.has(e)) continue
+      seen.add(e)
+      entries.push(e)
+    }
+    lines.push(`## ${d}`, ...entries, '')
+  }
+  return lines.join('\n').replace(/\n+$/, '') + '\n'
 }
 
 /**

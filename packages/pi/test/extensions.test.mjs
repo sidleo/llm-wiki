@@ -58,10 +58,10 @@ describe("pi-wiki extension", () => {
     return t.execute("id", params || {}, undefined, undefined, {});
   };
 
-  test("注册 13 个 wiki_* 工具", () => {
-    const expected = ["wiki_list", "wiki_search", "wiki_get", "wiki_create", "wiki_update", "wiki_validate", "wiki_lint", "wiki_ingest", "wiki_deprecate", "wiki_rules", "wiki_help", "wiki_dirs", "wiki_use"];
+  test("注册 14 个 wiki_* 工具", () => {
+    const expected = ["wiki_list", "wiki_search", "wiki_get", "wiki_create", "wiki_update", "wiki_validate", "wiki_lint", "wiki_ingest", "wiki_deprecate", "wiki_rules", "wiki_help", "wiki_dirs", "wiki_use", "wiki_sync"];
     for (const n of expected) assert.ok(registered.has(n), `缺少 ${n}`);
-    assert.equal(registered.size, 13);
+    assert.equal(registered.size, 14);
   });
 
   test("wiki_validate 合规", async () => {

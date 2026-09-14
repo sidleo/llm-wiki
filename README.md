@@ -18,6 +18,8 @@ An open-source, generic, agent-first knowledge base: **the format layer strictly
 - **Lifecycle** — `stale_after` expiry, `status: deprecated` (concept-level) and directory-level deprecation, auto-maintained `index.md` / `log.md`.
 - **Validation & health** — `wiki_validate` (OKF compliance) and `wiki_lint` (broken links, orphans, stale entries, missing index).
 - **Multiple bundles** — register several wiki directories as named bundles and switch between them (session-level or persisted globally).
+- **Online knowledge base (Git remote sync)** — the bundle stays a local Markdown tree; attach a remote and several machines / people / agents read and write the same one through `wiki_sync` (or `wiki sync`): commit → fetch/merge → push. `index.md` is regenerated, `log.md` is merged as a union (concurrent writes never block); concept conflicts stop the sync and list the files, the working tree returns to its pre-sync state, and force-push is never used.
+- **Graphical configuration (DSH Web GUI)** — an llm-wiki card under Settings → Plugins → Plugin configuration: named directories (add/rename/remove/set default), Git remote status with one-click sync/init/clone, and a health panel (validate/lint counts + rebuild index). Runtime parameters are deployment-level (the profile's `cordis.patch.yml`) and are deliberately not editable from the card.
 
 ## The Wiki Bundle (Directory Structure)
 
@@ -68,9 +70,37 @@ llm-wiki/
 
 All three forms read and write **the same bundle** with identical behavior — they reuse `packages/core`, no duplicated implementation.
 
-## Tools (13)
+## Tools (14)
 
-`wiki_list` · `wiki_search` · `wiki_get` (with backlinks) · `wiki_create` · `wiki_update` · `wiki_validate` · `wiki_lint` · `wiki_ingest` · `wiki_deprecate` · `wiki_rules` · `wiki_help` · `wiki_dirs` · `wiki_use`
+`wiki_list` · `wiki_search` · `wiki_get` (with backlinks) · `wiki_create` · `wiki_update` · `wiki_validate` · `wiki_lint` · `wiki_ingest` · `wiki_deprecate` · `wiki_rules` · `wiki_help` · `wiki_dirs` · `wiki_use` · `wiki_sync`
+
+### Online knowledge base (Git remote sync)
+
+```bash
+# Existing local bundle: attach a remote and push (--name also registers a named bundle)
+wiki sync init --remote git@host:group/wiki.git --name team --use
+
+# A new machine: clone and register
+wiki sync clone git@host:group/wiki.git ~/Documents/llm-wiki --name team --use
+
+# Daily: check status, then sync (commit local changes → fetch/merge → push)
+wiki sync status
+wiki sync --message "add pricing notes"
+```
+
+Conflict policy: `index.md` is derived and regenerated from the merged tree; `log.md` is append-only and merged as a union per date block; concepts / `AGENTS.md` / `APPEND_SYSTEM_PROMPT.md` are authored content — on conflict the sync stops, reports the paths and restores the pre-sync working tree (local commits kept), so a human can merge and re-run. Credentials stay with git (SSH agent / credential helper): no tokens are stored and force-push is never used. See `wiki help sync`.
+
+### Graphical configuration (DSH Web GUI)
+
+Settings → Plugins → Plugin configuration → llm-wiki card (the host renders the intersection of *served settings namespaces* and *registered cards*; the card key is `dsh-wiki`):
+
+| Section | What it edits | Where it lands |
+|---------|---------------|----------------|
+| Named directories | add / rename / remove / set default | `~/.agents/wiki-registry.json` (shared with CLI/pi; removal only unregisters, never deletes) |
+| Git sync | remote/branch/ahead-behind/conflicts + sync / init / clone | core `git.mjs`, the same implementation as `wiki_sync` |
+| Health & index | validate/lint counts and details, rebuild index | core `validateBundle` / `lintBundle` / `refreshIndex` |
+
+(Runtime parameters are not in the card: data dir, injection section name/order, limits and cache TTL are deployment-level and live in the profile's `cordis.patch.yml`.)
 
 ## Multiple Bundles (Named Directories)
 
@@ -115,7 +145,10 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 
 ```bash
 node scripts/smoke-test.mjs              # 36 checks: core tool chain + registry + ingest/lint end-to-end
-node tests/dsh-mock-test.mjs             # 31 checks: DSH plugin (mock host) tools + injection layers + gates + multi-bundle
+node tests/dsh-mock-test.mjs             # 33 checks: DSH plugin (mock host) tools + injection layers + gates + multi-bundle + sync
+node --test tests/dsh-config-test.mjs    # 9 checks: config card host half (settings namespace + /api/dsh-wiki/* routes)
+node --test tests/git-sync.test.mjs      # 8 checks: Git remote sync (sequential writes / concurrent log / index / concept conflicts)
+node --test tests/dsh-client-bundle-test.mjs   # 5 checks: card bundle contract + jsdom render smoke
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 checks: pi extension (mock pi)
 node --test tests/three-forms.test.mjs   # 5 checks: all three forms read/write the same bundle consistently
 ```

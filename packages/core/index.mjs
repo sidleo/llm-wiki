@@ -5,7 +5,8 @@
  *
  * 导出 9 个工具函数（与 wiki_* 工具一一对应）：
  *   list / search / get / create / update / validate / lint / ingest / deprecate
- * 加辅助：resolveRules（AGENTS.md 规则解析）、appendLog/updateIndex（维护）、
+ * 加辅助：resolveRules（AGENTS.md 规则解析）、appendLog/updateIndex/refreshIndex（维护）、
+ * git 远端同步（gitStatus/gitSync/gitInit/gitClone，在线知识库）、
  * parseDoc/serializeDoc（格式工具，供上层自定义编辑）。
  */
 
@@ -19,9 +20,12 @@ export { lintBundle } from './lib/lint.mjs'
 export { searchGraph, getConcept } from './lib/search.mjs'
 export { findRules, readRules, resolveRules, parseGateDecl, gateForType } from './lib/rules.mjs'
 export { getHelp, HELP_TOPICS } from './lib/help.mjs'
-export { renderIndexBody, writeDirIndex, updateIndex, appendLog } from './lib/indexlog.mjs'
+export { renderIndexBody, writeDirIndex, updateIndex, refreshIndex, mergeLogText, appendLog } from './lib/indexlog.mjs'
 export { createConcept, updateConcept, deprecateDir, nowIso, checkId } from './lib/write.mjs'
 export { ingestSource } from './lib/ingest.mjs'
+
+// Git 远端同步（在线知识库）：headless、无三方依赖、凭证交给 git
+export { gitAvailable, gitStatus, gitSync, gitInit, gitClone, DEFAULT_GIT_TIMEOUT_MS } from './lib/git.mjs'
 
 // 命名 bundle 注册表：默认数据目录 ~/.agents/wiki + 多目录注册/切换（跨三形态）
 export {
@@ -30,6 +34,7 @@ export {
   readRegistry,
   writeRegistry,
   writeRegistryActive,
+  removeBundle,
   expandTilde,
   effectiveBundles,
   fallbackPath,

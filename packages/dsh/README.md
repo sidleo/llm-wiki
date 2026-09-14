@@ -28,9 +28,14 @@ dsh plugin --profile web add link:/path/to/packages/dsh
     在目标续跑等请求序列边界上更是整段前缀作废——故不放。
   - **概念计数不参与注入**（每次写入都变的高频源），目录树与分支清单按需用
     `wiki_list` / `wiki_dirs` 获取。
-- **13 个工具**：`wiki_list` / `wiki_search` / `wiki_get`（附 backlinks）/ `wiki_create` /
+- **14 个工具**：`wiki_list` / `wiki_search` / `wiki_get`（附 backlinks）/ `wiki_create` /
   `wiki_update` / `wiki_validate` / `wiki_lint` / `wiki_ingest` / `wiki_deprecate` /
-  `wiki_rules` / `wiki_help`（机制文档自助查）/ `wiki_dirs` / `wiki_use`。
+  `wiki_rules` / `wiki_help`（机制文档自助查）/ `wiki_dirs` / `wiki_use` / `wiki_sync`（Git 远端同步）。
+- **图形化配置（设置 → 插件 → 插件配置）**：注册设置命名空间 `dsh-wiki`（空 schema，仅作卡片
+  可见性钥匙），浏览器半 `lib/client.js` 按 key = 命名空间注册卡片，三区：命名目录管理 /
+  在线同步 / 体检与索引。**运行参数不提供界面编辑**（部署级配置，改 profile 的 `cordis.patch.yml`）。
+  宿主半另注册 `/api/dsh-wiki/*` RPC（卡片只走这些端点）。**卡片可见性依赖命名空间注册**：
+  宿主「插件配置」Tab 只渲染「已服务命名空间 ∩ 已注册卡片」。
 - **多目录（命名 bundle）**：注册多个 wiki 目录并切换。`wiki_dirs` 查看分支；
   `wiki_use <name>` 会话级切换（按对话隔离，仅当前对话生效），`global: true`
   持久化为全局默认（写注册表 `~/.agents/wiki-registry.json`，新会话与 CLI/pi 生效）。
@@ -76,12 +81,21 @@ dsh plugin --profile web add link:/path/to/packages/dsh
 
 ```bash
 node --check wiki.mjs
-node tests/dsh-mock-test.mjs        # 宿主无关 mock：13 工具注册 + 注入分层 + 门控 + 多目录（31 项）
+node tests/dsh-mock-test.mjs        # 宿主无关 mock：14 工具注册 + 注入分层 + 门控 + 多目录 + 同步诊断（33 项）
+node --test tests/dsh-config-test.mjs       # 配置卡片宿主半：设置命名空间 + /api/dsh-wiki/*（9 项）
+node --test tests/dsh-client-bundle-test.mjs # 卡片产物契约 + jsdom 渲染（5 项）
+
+# 浏览器半构建（改 src/client/ 后必须重跑）
+npm install && npm run build        # 产出 lib/client.js（tsdown，banner = __ModuleLoader__.load）
+npm run typecheck                   # tsc --noEmit
+
+# 本地迭代：profile 用仓库目录替换 registry 版本（改 host 半需重启 dsh web）
+dsh plugin --profile web add link:/path/to/packages/dsh
 ```
 
 ## 依赖
 
-运行时自包含（vendor-core 内嵌，`npm run sync-vendor` 从仓库 `packages/core` 同步）；独立引用 core 可用 `@sidleo3/llm-wiki-core`。
+宿主半运行时自包含（vendor-core 内嵌，`npm run sync-vendor` 从仓库 `packages/core` 同步）；独立引用 core 可用 `@sidleo3/llm-wiki-core`。浏览器半额外依赖 `schemastery`（宿主半注册设置命名空间的 schema；缺失时插件照常工作，只是卡片不出现）与 React（平台基线模块，构建期 external，运行时由 loader 提供）。
 
 ## 许可
 

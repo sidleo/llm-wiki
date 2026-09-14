@@ -10,6 +10,7 @@
 # 注入分两层：恒定层 section（恒定文本，不随会话/分支变化）+ 会话层 runtime context 快照
 # （bundle 路径/目录清单/APPEND_SYSTEM_PROMPT 规则，追加在会话尾部）。易变内容不进 system
 # prompt，否则一字节变化就打断整段前缀缓存；概念计数不进注入，清单用 wiki_list/wiki_dirs。
+# 运行参数只在这里（部署级）：设置卡片刻意不提供参数编辑，插件也不会自动改写本文件（含 remote-web-ui 的 managed 区块）。
 # 数据目录默认 ~/.agents/wiki（wiki.mjs 内以 os.homedir() 计算）；覆盖用 id 定向补丁：
 #   - id: wiki-registry
 #     config:
