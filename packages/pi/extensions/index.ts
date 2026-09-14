@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 扩展版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const PI_VERSION = "0.4.6";
+const PI_VERSION = "0.4.7";
 
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;
@@ -522,6 +522,7 @@ function formatSync(kind: string, action: string, r: any): string {
       const lines = [`在线库状态：待推送 ${c.push} / 待拉取 ${c.pull} / 冲突 ${c.conflict}｜本地 ${c.local} 个 .md，远端 ${c.remote} 个 .md`];
       if (r.conflict.length) lines.push(`- 冲突（两侧都改）：${r.conflict.map((x: any) => x.rel).join("、")}`);
       if (r.remoteDeleted.length) lines.push(`- 远端已删（本地保留）：${r.remoteDeleted.join("、")}`);
+      if (r.duplicates && r.duplicates.length) lines.push(`- ⚠ 远端同名重复（飞书允许重名，工具不替你挑）：${r.duplicates.map((d: any) => d.rel).join("、")}——建议在飞书里删掉多余的那个，否则涉及该目录的推送会停下报错。`);
       return lines.join("\n");
     }
     if (r.ok) {

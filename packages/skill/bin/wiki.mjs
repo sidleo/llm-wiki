@@ -52,7 +52,7 @@ async function loadCore() {
 }
 
 /** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const CLI_VERSION = '0.4.6'
+const CLI_VERSION = '0.4.7'
 
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
@@ -162,6 +162,7 @@ function printFeishu(action, r) {
     if (r.pull.length) console.log(`- 待拉取：${r.pull.map((x) => x.rel).slice(0, 8).join('、')}${r.pull.length > 8 ? ' …' : ''}`)
     if (r.conflict.length) console.log(`- 冲突（两侧都改）：${r.conflict.map((x) => x.rel).join('、')}`)
     if (r.remoteDeleted.length) console.log(`- 远端已删（本地保留）：${r.remoteDeleted.join('、')}`)
+    if (r.duplicates && r.duplicates.length) console.log(`- ⚠ 远端同名重复（飞书允许重名，工具不替你挑）：${r.duplicates.map((d) => d.rel).join('、')}——建议在飞书里删掉多余的那个，否则涉及该目录的推送会停下报错。`)
     if (r.ignored && r.ignored.length) console.log(`- 已忽略的非 .md 资源：${r.ignored.slice(0, 5).join('、')}`)
     return
   }

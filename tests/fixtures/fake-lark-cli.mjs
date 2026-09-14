@@ -134,7 +134,8 @@ if (domain === 'drive' && cmd === 'files' && argv[2] === 'list') {
   if (rel === undefined) fail(`folder not found: ${folderToken}`, 'not_found')
   const entries = []
   for (const [d, info] of Object.entries(st.dirs)) {
-    if ((info.parent || '') === rel) entries.push({ type: 'folder', token: info.token, name: d.split('/').pop(), parent_token: folderToken })
+    // info.name 可显式覆盖：用于构造「同一父目录下同名兄弟」（真实飞书允许重名）
+    if ((info.parent || '') === rel) entries.push({ type: 'folder', token: info.token, name: info.name || d.split('/').pop(), parent_token: folderToken })
   }
   for (const [f, info] of Object.entries(st.files)) {
     if ((info.parent || '') === rel) entries.push({ type: 'file', token: info.fileToken, name: f.split('/').pop(), parent_token: folderToken, modified_time: String(info.modified) })

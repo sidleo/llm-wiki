@@ -309,4 +309,61 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
     assert.equal(r.ok, true, JSON.stringify(r))
     assert.ok(await exists(join(cacheDir, 'gone.md')), '本地文件必须保留')
   })
+
+  test('远端已有目录 + 本地账本没有 dirTokens → 复用远端目录，绝不重建同名目录（重复目录事故回归）', async () => {
+    // 远端先存在：根下已有一个 tables/ 目录（别人建的 / 换机器 / 账本丢了）
+    await writeFile(
+      stateFile,
+      JSON.stringify({ files: {}, dirs: { tables: { token: 'fldcnEXIST', parent: '' } }, nextId: 7 }),
+    )
+    // 本地缓存是全新的（.wiki-cloud.json 不存在 → 读到空 idx，dirTokens 为空）
+    await writeLocal('tables/orders.md', '# orders\n')
+    const r = await core.feishuPush(spec(), { paths: ['tables/orders.md'] })
+    assert.equal(r.ok, true, JSON.stringify(r))
+    assert.deepEqual(r.dirs, [], '不得新建目录（远端已存在同名目录）')
+    const calls = await readLog(logFile)
+    assert.equal(calls.filter((a) => a[1] === '+create-folder').length, 0, '不应出现 +create-folder')
+    const st = await readState(stateFile)
+    assert.equal(st.dirs.tables.token, 'fldcnEXIST', '文件应写进原有目录')
+    assert.ok(st.files['tables/orders.md'], '文件已创建在原目录下')
+    // 账本自愈：把远端学到的目录 token 记下来
+    const idx = JSON.parse(await readFile(join(cacheDir, '.wiki-cloud.json'), 'utf8'))
+    assert.equal(idx.dirTokens.tables, 'fldcnEXIST')
+  })
+
+  test('拉取也顺手记下 dirTokens（新缓存 / 换机器后不再是目录盲）', async () => {
+    await writeFile(
+      stateFile,
+      JSON.stringify({ files: { 'tables/orders.md': { fileToken: 'boxcn1', content: '# o\n', modified: 100, parent: 'tables' } }, dirs: { tables: { token: 'fldcnEXIST', parent: '' } }, nextId: 9 }),
+    )
+    assert.equal((await core.feishuPull(spec(), { paths: ['tables/orders.md'] })).ok, true)
+    const idx = JSON.parse(await readFile(join(cacheDir, '.wiki-cloud.json'), 'utf8').catch(() => '{}'))
+    assert.equal(idx.dirTokens && idx.dirTokens.tables, 'fldcnEXIST')
+  })
+
+  test('远端出现同名重复目录 → 状态/推送/拉取一律停下报清单，绝不在重复状态下同步', async () => {
+    // 真实飞书允许同一父目录下重名：这里构造根下两个都叫 tables 的目录
+    await writeFile(
+      stateFile,
+      JSON.stringify({
+        files: {},
+        dirs: { d1: { token: 'fldcnA', parent: '', name: 'tables' }, d2: { token: 'fldcnB', parent: '', name: 'tables' } },
+        nextId: 5,
+      }),
+    )
+    const status = await core.feishuStatus(spec())
+    assert.equal(status.ok, false)
+    assert.equal(status.step, 'duplicate-remote')
+    assert.match(status.error, /同名重复/)
+    assert.ok(status.duplicates.some((d) => d.rel === 'tables'), JSON.stringify(status.duplicates))
+    await writeLocal('tables/orders.md', '# o\n')
+    const push = await core.feishuPush(spec(), { paths: ['tables/orders.md'] })
+    assert.equal(push.ok, false)
+    assert.equal(push.step, 'duplicate-remote')
+    assert.equal((await core.feishuPull(spec())).step, 'duplicate-remote')
+    assert.equal((await core.feishuSync(spec())).step, 'duplicate-remote')
+    const calls = await readLog(logFile)
+    assert.equal(calls.filter((a) => a[1] === '+create-folder').length, 0, '重复状态下不得建目录')
+    assert.equal(calls.filter((a) => a[1] === '+create').length, 0, '重复状态下不得写文件')
+  })
 })

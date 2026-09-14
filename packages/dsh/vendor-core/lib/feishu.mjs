@@ -197,6 +197,7 @@ export async function feishuListRemote(spec, opts = {}) {
   const files = new Map()
   const dirs = new Map([['', s.folderToken]])
   const ignored = []
+  const duplicates = []
   const timeoutMs = opts.timeoutMs || FEISHU_FULL_TIMEOUT_MS
 
   async function listFolder(folderToken) {
@@ -218,9 +219,19 @@ export async function feishuListRemote(spec, opts = {}) {
   async function walk(folderToken, prefix) {
     const listed = await listFolder(folderToken)
     if (!listed.ok) return listed
-    const subs = []
+    // 同一父目录下的同名兄弟：飞书允许重名，我们的 rel 键装不下两个 →
+    // 记下来报给用户（绝不静默挑一个，否则会写错地方或再建第三个）。
+    const byName = new Map()
     for (const f of listed.entries) {
-      const rel = prefix ? `${prefix}/${f.name}` : f.name
+      const group = byName.get(f.name) || []
+      group.push(f)
+      byName.set(f.name, group)
+    }
+    const subs = []
+    for (const [name, group] of byName) {
+      const rel = prefix ? `${prefix}/${name}` : name
+      if (group.length > 1) duplicates.push({ rel, kind: group[0].type, tokens: group.map((f) => f.token) })
+      const f = group[0]
       if (f.type === 'folder') {
         dirs.set(rel, f.token)
         subs.push([rel, f.token])
@@ -242,6 +253,25 @@ export async function feishuListRemote(spec, opts = {}) {
     files: new Map([...files].sort(byPath)),
     dirs: new Map([...dirs].sort(byPath)),
     ignored: ignored.sort(),
+    duplicates: duplicates.sort(byPath),
+  }
+}
+
+/**
+ * 远端树有同名重复时的硬闸门：rel 键装不下两个同名兄弟，此时列举结果必然只覆盖
+ * 其中一棵（另一棵的内容会被误判成「本地新增」而去推送/覆盖），任何同步动作都不安全。
+ * 因此状态/拉取/推送一律停下报清单，绝不猜、也绝不在重复状态下动数据。
+ * @returns {null | {ok:false, step:string, error:string, duplicates:object[], next:string}}
+ */
+function duplicateGuard(remote) {
+  const dups = (remote && remote.duplicates) || []
+  if (!dups.length) return null
+  return {
+    ok: false,
+    step: 'duplicate-remote',
+    error: `远端有 ${dups.length} 处同名重复（飞书允许重名）：${dups.map((d) => d.rel).join('、')}`,
+    duplicates: dups,
+    next: '在飞书云盘里删掉多余的那个（保留有内容的那个），再重跑；本工具不会替你猜，也不会在重复状态下同步。',
   }
 }
 
@@ -256,6 +286,8 @@ export async function feishuStatus(spec, opts = {}) {
   const idx = await readIndex(s.cacheDir)
   const remote = await feishuListRemote(s, opts)
   if (!remote.ok) return remote
+  const dup = duplicateGuard(remote)
+  if (dup) return dup
   const local = await scanLocal(s.cacheDir)
 
   const push = []
@@ -298,7 +330,8 @@ export async function feishuStatus(spec, opts = {}) {
     conflict,
     remoteDeleted,
     ignored: remote.ignored || [],
-    counts: { push: push.length, pull: pull.length, conflict: conflict.length, remoteDeleted: remoteDeleted.length, local: local.size, remote: remote.files.size },
+    duplicates: remote.duplicates || [],
+    counts: { push: push.length, pull: pull.length, conflict: conflict.length, remoteDeleted: remoteDeleted.length, local: local.size, remote: remote.files.size, duplicates: (remote.duplicates || []).length },
   }
 }
 
@@ -325,6 +358,8 @@ export async function feishuPull(spec, opts = {}) {
   const s = feishuSpecOf(spec)
   const remote = await feishuListRemote(s, opts)
   if (!remote.ok) return remote
+  const dup = duplicateGuard(remote)
+  if (dup) return dup
   const rels = Array.isArray(opts.paths) && opts.paths.length ? opts.paths : [...remote.files.keys()]
   const pulled = []
   const failed = []
@@ -349,17 +384,42 @@ export async function feishuPull(spec, opts = {}) {
       if (r.backup) backups.push(r.backup)
     } else failed.push({ rel: r.rel, error: r.error })
   }
+  // 顺手把远端目录 token 记进账本：新缓存/换机器后账本没有 dirTokens，
+  // 下次推送会凭名字重建同名目录（重复目录事故）——这里自愈。
+  if (remote.dirs && remote.dirs.size) {
+    const idx = await readIndex(s.cacheDir)
+    const merged = { ...(idx.dirTokens || {}) }
+    for (const [rel, token] of remote.dirs) if (token) merged[rel] = token
+    idx.dirTokens = merged
+    await writeIndex(s.cacheDir, idx)
+  }
   return { ok: failed.length === 0, pulled, failed, backups }
 }
 
-/** 确保远端目录存在，返回 rel → folderToken 映射（沿用索引缓存）。 */
-async function ensureRemoteDirs(s, dirsNeeded, opts) {
+/**
+ * 确保远端目录存在，返回 rel → folderToken 映射。
+ *
+ * **以活体远端列举为准**（remoteDirs），本地账本只作补充：账本可能缺失
+ * （新缓存 / 换机器 / 首次拉取后没有 dirTokens），此时若只凭名字 +create-folder，
+ * 就会在已有同名目录旁边再建一个同名目录（飞书允许重名）——这正是 0.4.6 之前的
+ * 重复目录事故根因。同名兄弟已存在（duplicates）时绝不猜：停下来报给用户。
+ */
+async function ensureRemoteDirs(s, dirsNeeded, opts, remoteDirs = new Map(), duplicates = []) {
   const idx = await readIndex(s.cacheDir)
   const dirTokens = { ...(idx.dirTokens || {}), '': s.folderToken }
+  for (const [rel, token] of remoteDirs) if (token) dirTokens[rel] = token
+  const ambiguous = new Set((duplicates || []).filter((d) => d.kind === 'folder').map((d) => d.rel))
   const created = []
   const sorted = [...dirsNeeded].sort((a, b) => a.split('/').length - b.split('/').length)
   for (const dir of sorted) {
     if (dirTokens[dir]) continue
+    if (ambiguous.has(dir)) {
+      return {
+        ok: false,
+        error: `远端存在多个同名目录（${dir}），无法安全判定用哪个`,
+        next: '在飞书里删掉多余的同名目录后重跑；本工具不会替你猜，也不会再建第三个。',
+      }
+    }
     const parent = dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : ''
     const parentToken = dirTokens[parent]
     if (parentToken === undefined) return { ok: false, error: `无法确定父目录 token：${parent || '(根)'}` }
@@ -383,10 +443,12 @@ export async function feishuPush(spec, opts = {}) {
   const s = feishuSpecOf(spec)
   const remote = await feishuListRemote(s, opts)
   if (!remote.ok) return remote
+  const dup = duplicateGuard(remote)
+  if (dup) return dup
   const local = await scanLocal(s.cacheDir)
   const rels = Array.isArray(opts.paths) && opts.paths.length ? opts.paths : [...local.keys()]
   const dirsNeeded = new Set(rels.map((rel) => (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '')).filter((d) => d !== ''))
-  const dirs = await ensureRemoteDirs(s, dirsNeeded, opts)
+  const dirs = await ensureRemoteDirs(s, dirsNeeded, opts, remote.dirs, remote.duplicates)
   if (!dirs.ok) return dirs
 
   const pushed = []

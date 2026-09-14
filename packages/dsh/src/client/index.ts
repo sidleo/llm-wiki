@@ -367,6 +367,9 @@ function Card() {
               sync && sync.feishu && sync.feishu.conflict && sync.feishu.conflict.length
                 ? e('div', { className: 'dwWarn' }, `冲突（两侧都改，需人工处理）：${sync.feishu.conflict.map((x) => x.rel).join('、')}`)
                 : null,
+              sync && sync.feishu && sync.feishu.duplicates && sync.feishu.duplicates.length
+                ? e('div', { className: 'dwWarn' }, `⚠ 远端同名重复：${sync.feishu.duplicates.map((x) => x.rel).join('、')}——飞书允许重名，工具不替你挑；请在飞书里删掉多余的那个（涉及该目录的推送会停下报错）。`)
+                : null,
               sync && sync.feishu && sync.feishu.remoteDeleted && sync.feishu.remoteDeleted.length
                 ? e('div', { className: 'dwHint' }, `远端已删（本地保留）：${sync.feishu.remoteDeleted.join('、')}`)
                 : null,

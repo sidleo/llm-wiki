@@ -43,7 +43,7 @@ export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
 /** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.4.6'
+const PLUGIN_VERSION = '0.4.7'
 
 /** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
 const SETTINGS_NS = 'dsh-wiki'
@@ -201,6 +201,7 @@ function formatFeishuResult(action, r) {
     if (r.pull.length) lines.push(`- 待拉取：${r.pull.map((x) => x.rel).slice(0, 8).join('、')}${r.pull.length > 8 ? ' …' : ''}`)
     if (r.conflict.length) lines.push(`- 冲突（两侧都改）：${r.conflict.map((x) => x.rel).join('、')}`)
     if (r.remoteDeleted.length) lines.push(`- 远端已删（本地保留，v1 不同步删除）：${r.remoteDeleted.join('、')}`)
+    if (r.duplicates && r.duplicates.length) lines.push(`- ⚠ 远端同名重复（飞书允许重名，工具不替你挑）：${r.duplicates.map((d) => d.rel).join('、')}——建议在飞书里删掉多余的那个，否则涉及该目录的推送会停下报错。`)
     if (r.ignored && r.ignored.length) lines.push(`- 已忽略的非 .md 资源：${r.ignored.slice(0, 5).join('、')}${r.ignored.length > 5 ? ' …' : ''}`)
     return lines.join('\n')
   }
@@ -209,6 +210,7 @@ function formatFeishuResult(action, r) {
     if (r.createdFolder) lines.push(`- 新建飞书文件夹：${r.createdFolder.name} → ${r.url}`)
     if (r.pushed && r.pushed.length) lines.push(`- 推送 ${r.pushed.length} 个文件（新增 ${(r.created || []).length}）`)
     if (r.pulled && r.pulled.length) lines.push(`- 拉取 ${r.pulled.length} 个文件`)
+    for (const w of r.warnings || []) lines.push(`- ⚠ ${w}`)
     if (r.after) lines.push(`- 现在：待推送 ${r.after.push} / 待拉取 ${r.after.pull} / 冲突 ${r.after.conflict}`)
     for (const st of r.steps || []) lines.push(`  · ${st}`)
     if (r.backups && r.backups.length) lines.push(`- 覆盖前备份：${r.backups.slice(0, 3).join('、')}${r.backups.length > 3 ? ' …' : ''}`)
