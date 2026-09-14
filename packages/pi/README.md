@@ -23,7 +23,7 @@ Pi 会话注入 14 个工具 + prompt 引导：
 | `wiki_help` | 机制文档自助查（AGENTS/APPEND 写法、frontmatter、门控） |
 | `wiki_dirs` | 查看全部 wiki 目录分支（命名 bundle）与当前激活项 |
 | `wiki_use` | 切换全局默认目录分支（写注册表 active；pi 无会话态） |
-| `wiki_sync` | 在线知识库：Git 远端同步（status/sync/init/clone；index.md 自动重生成、log.md 取并集，概念冲突停止并报清单，不 force push） |
+| `wiki_sync` | 在线知识库同步（按后端分派）：本地目录→Git 远端；飞书云盘库→lark-cli（status/sync/pull/push/init）。index.md 重生成、log.md 取并集；两侧都改则停下报清单，绝不 force/覆盖 |
 
 ## 安装
 

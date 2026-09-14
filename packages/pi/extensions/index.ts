@@ -414,41 +414,102 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
     },
   });
 
-  // wiki_sync —— 在线知识库（Git 远端同步），与 DSH 形态同一 core 实现
+  // wiki_sync —— 在线知识库同步（本地目录→Git；飞书云盘库→lark-cli），与 DSH 形态同一 core 实现
   pi.registerTool({
     name: "wiki_sync",
     label: "Wiki Sync",
-    description: "在线知识库（Git 远端同步）：status 只读看远端/分支/领先落后/冲突；sync 提交本地改动+拉取合并+推送；init 给本地 bundle 挂远端并首推；clone 克隆远端为本地 bundle。index.md 自动重生成、log.md 取并集，概念冲突会停止同步并报清单（不 force push）。",
-    promptSnippet: "在线知识库：Git 远端同步（status/sync/init/clone）",
+    description: "在线知识库同步，按 bundle 后端自动分派：本地目录走 Git 远端（status/sync/init/clone），飞书云盘库走 lark-cli（status/sync/pull/push/init；文件级增量、永不删两端）。index.md 重生成、log.md 取并集；概念冲突停下来报清单，绝不 force/覆盖。",
+    promptSnippet: "在线知识库同步：Git 远端 / 飞书云盘库（status/sync/pull/push/init/clone）",
     promptGuidelines: guidelines(),
     parameters: Type.Object({
-      action: Type.String({ description: "status | sync | init | clone", enum: ["status", "sync", "init", "clone"] }),
-      message: Type.Optional(Type.String({ description: "sync 时的提交信息" })),
-      remote: Type.Optional(Type.String({ description: "init：远端 URL" })),
+      action: Type.String({ description: "status | sync | pull | push | init | clone", enum: ["status", "sync", "pull", "push", "init", "clone"] }),
+      message: Type.Optional(Type.String({ description: "git sync 的提交信息" })),
+      bundle: Type.Optional(Type.String({ description: "目标命名 bundle（缺省=当前生效）" })),
+      remote: Type.Optional(Type.String({ description: "init（git）：远端 URL" })),
+      folder_token: Type.Optional(Type.String({ description: "init（飞书）：文件夹 URL 或 token" })),
+      new_folder: Type.Optional(Type.String({ description: "init（飞书）：在我的空间新建同名文件夹" })),
+      cache_dir: Type.Optional(Type.String({ description: "init（飞书）：本地缓存目录" })),
+      adopt: Type.Optional(Type.String({ description: "飞书首次同步裁决：local | remote", enum: ["local", "remote"] })),
       url: Type.Optional(Type.String({ description: "clone：远端 URL" })),
       dir: Type.Optional(Type.String({ description: "clone：本地目标目录" })),
-      name: Type.Optional(Type.String({ description: "init/clone：同时注册为命名 bundle" })),
+      name: Type.Optional(Type.String({ description: "init/clone：注册为命名 bundle" })),
       use: Type.Optional(Type.Boolean({ description: "init/clone：注册后设为全局默认" })),
-      branch: Type.Optional(Type.String({ description: "init：初始分支名（缺省 main）" })),
+      branch: Type.Optional(Type.String({ description: "init（git）：初始分支名" })),
     }),
     async execute(_id, params) {
       try {
         const core = await loadCore();
         const action = String(params.action || "");
-        const resolved = await core.resolveBundleRoot(config, {});
         if (action === "clone") {
           if (!params.url || !params.dir) return ok("clone 需要 url 与 dir 参数。");
-          return ok(formatGit(action, await core.gitClone(params.url, params.dir, { name: params.name, use: params.use === true })));
+          return ok(formatSync("git", action, await core.gitClone(params.url, params.dir, { name: params.name, use: params.use === true })));
         }
-        if (action === "status") return ok(formatGit(action, await core.gitStatus(resolved.path)));
-        if (action === "sync") return ok(formatGit(action, { ...(await core.gitSync(resolved.path, { message: params.message })), bundle: resolved }));
-        if (action === "init") return ok(formatGit(action, { ...(await core.gitInit(resolved.path, { remote: params.remote, branch: params.branch, name: params.name, use: params.use === true })), bundle: resolved }));
-        return ok(`未知 action「${params.action}」：可用 status | sync | init | clone。`);
+        if (action === "init" && (params.folder_token || params.new_folder)) {
+          return ok(formatSync("feishu", "init", await core.feishuInit({ name: params.name, folderToken: params.folder_token, newFolder: params.new_folder, cacheDir: params.cache_dir, use: params.use === true })));
+        }
+        const resolved = params.bundle
+          ? await core.resolveBundleRoot(config, { name: params.bundle })
+          : await core.resolveBundleRoot(config, {});
+        const feishu = resolved.kind === "feishu";
+
+        if (action === "status") {
+          return ok(feishu ? formatSync("feishu", action, await core.feishuStatus(resolved)) : formatSync("git", action, await core.gitStatus(resolved.path)));
+        }
+        if (feishu) {
+          if (action === "sync") return ok(formatSync("feishu", action, { ...(await core.feishuSync(resolved, { adopt: params.adopt, message: params.message })), bundle: resolved }));
+          if (action === "pull" || action === "push") {
+            const before = await core.feishuStatus(resolved);
+            if (!before.ok) return ok(formatSync("feishu", action, before));
+            if (action === "push" && before.conflict.length) {
+              return ok(formatSync("feishu", action, { ok: false, step: "conflict", conflicts: before.conflict.map((x: any) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: "请先人工处理冲突（飞书或本地任选一侧）再重跑。" }));
+            }
+            const r = action === "pull"
+              ? await core.feishuPull(resolved, { paths: before.pull.map((x: any) => x.rel) })
+              : await core.feishuPush(resolved, { paths: before.push.map((x: any) => x.rel) });
+            return ok(formatSync("feishu", action, { ...r, bundle: resolved }));
+          }
+          return ok(`飞书后端不支持 action「${params.action}」：可用 status | sync | pull | push | init。`);
+        }
+        if (action === "sync" || action === "push" || action === "pull") {
+          return ok(formatSync("git", action, { ...(await core.gitSync(resolved.path, { message: params.message, push: action !== "pull" })), bundle: resolved }));
+        }
+        if (action === "init") {
+          return ok(formatSync("git", "init", { ...(await core.gitInit(resolved.path, { remote: params.remote, branch: params.branch, name: params.name, use: params.use === true })), bundle: resolved }));
+        }
+        return ok(`未知 action「${params.action}」：可用 status | sync | pull | push | init | clone。`);
       } catch (e) {
         return err(e);
       }
     },
   });
+}
+
+/** 在线同步结果文本化（git / 飞书两种后端）。 */
+function formatSync(kind: string, action: string, r: any): string {
+  if (kind === "feishu") {
+    if (action === "status") {
+      if (!r.ok) return `在线库状态：不可用\n- ${r.error}${r.next ? `\n- 下一步：${r.next}` : ""}`;
+      const c = r.counts || {};
+      const lines = [`在线库状态：待推送 ${c.push} / 待拉取 ${c.pull} / 冲突 ${c.conflict}｜本地 ${c.local} 个 .md，远端 ${c.remote} 个 .md`];
+      if (r.conflict.length) lines.push(`- 冲突（两侧都改）：${r.conflict.map((x: any) => x.rel).join("、")}`);
+      if (r.remoteDeleted.length) lines.push(`- 远端已删（本地保留）：${r.remoteDeleted.join("、")}`);
+      return lines.join("\n");
+    }
+    if (r.ok) {
+      if (action === "init") return `飞书在线库初始化完成：${r.name}\n- 文件夹：${r.url}\n- 本地缓存：${r.cacheDir}\n（首次 wiki_sync sync 会把本地内容推上去）`;
+      const lines = [`${action === "pull" ? "拉取完成" : action === "push" ? "推送完成" : "同步完成"}${r.bundle ? `：${r.bundle.name}` : ""}`];
+      if (r.pushed && r.pushed.length) lines.push(`- 推送 ${r.pushed.length} 个文件（新增 ${(r.created || []).length}）`);
+      if (r.pulled && r.pulled.length) lines.push(`- 拉取 ${r.pulled.length} 个文件`);
+      if (r.after) lines.push(`- 现在：待推送 ${r.after.push} / 待拉取 ${r.after.pull} / 冲突 ${r.after.conflict}`);
+      for (const s of r.steps || []) lines.push(`  · ${s}`);
+      return lines.join("\n");
+    }
+    const lines = [`${action}失败（${r.step || "unknown"}）：${r.error || "未知错误"}`];
+    if (r.conflicts && r.conflicts.length) lines.push(`- 冲突文件：${r.conflicts.join("、")}`);
+    if (r.next) lines.push(`- 下一步：${r.next}`);
+    return lines.join("\n");
+  }
+  return formatGit(action, r);
 }
 
 /** wiki_sync 结果文本化（与 DSH 形态语义一致）。 */

@@ -147,7 +147,7 @@ describe('DSH 插件配置卡片（宿主半）', () => {
       '/api/dsh-wiki/bundles',
       '/api/dsh-wiki/health',
       '/api/dsh-wiki/index',
-      '/api/dsh-wiki/git',
+      '/api/dsh-wiki/sync',
     ]) {
       assert.ok(routes.has(key), `缺少路由 ${key}`)
     }
@@ -253,31 +253,71 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     assert.equal(missing.body.ok, false)
   })
 
-  test('GET/POST /git：状态、同步失败指引、clone 参数校验', async () => {
-    const st = await callRoute(route('/api/dsh-wiki/git'), { url: '/api/dsh-wiki/git?bundle=demo' })
+  test('GET/POST /sync：git 后端状态/失败指引 + 飞书后端初始化', async () => {
+    const st = await callRoute(route('/api/dsh-wiki/sync'), { url: '/api/dsh-wiki/sync?bundle=demo' })
     assert.equal(st.body.ok, true, JSON.stringify(st.body))
+    assert.equal(st.body.backend, 'git')
     assert.equal(st.body.git.isRepo, false, '示例 bundle 不是 git 仓库')
 
-    const sync = await callRoute(route('/api/dsh-wiki/git'), { method: 'POST', body: { op: 'sync', bundle: 'demo' } })
+    const sync = await callRoute(route('/api/dsh-wiki/sync'), { method: 'POST', body: { op: 'sync', bundle: 'demo' } })
     assert.equal(sync.body.ok, false)
     assert.equal(sync.code, 409)
     assert.match(sync.body.next, /init|clone/)
 
-    const cloneNoArgs = await callRoute(route('/api/dsh-wiki/git'), { method: 'POST', body: { op: 'clone' } })
+    const cloneNoArgs = await callRoute(route('/api/dsh-wiki/sync'), { method: 'POST', body: { op: 'clone' } })
     assert.equal(cloneNoArgs.body.ok, false)
     assert.match(cloneNoArgs.body.error, /url/)
 
-    // 真仓库：init 后 status 应可用（isolated clone 到 tmp 下的新目录）
+    // 真仓库：init 后 status 应可用
     const repo = join(tmp, 'repo')
     await cp(join(ROOT, 'examples', 'demo-bundle'), repo, { recursive: true })
     const origin = join(tmp, 'origin.git')
     execFileSync('git', ['init', '--bare', '-b', 'main', origin], { stdio: 'ignore' })
     await core.writeRegistry({ bundles: { repo } })
-    const init = await callRoute(route('/api/dsh-wiki/git'), { method: 'POST', body: { op: 'init', bundle: 'repo', remote: origin, branch: 'main' } })
+    const init = await callRoute(route('/api/dsh-wiki/sync'), { method: 'POST', body: { op: 'init', bundle: 'repo', remote: origin, branch: 'main' } })
     assert.equal(init.body.ok, true, JSON.stringify(init.body))
-    const st2 = await callRoute(route('/api/dsh-wiki/git'), { url: '/api/dsh-wiki/git?bundle=repo' })
+    const st2 = await callRoute(route('/api/dsh-wiki/sync'), { url: '/api/dsh-wiki/sync?bundle=repo' })
     assert.equal(st2.body.git.isRepo, true)
     assert.equal(st2.body.git.remote, 'origin')
+  })
+
+  test('飞书后端：feishu-init 注册 + /state 带 kind/folderUrl + /sync 分派到飞书', async () => {
+    const prevBin = process.env.WIKI_LARK_BIN
+    const prevState = process.env.FAKE_LARK_STATE
+    const prevRoot = process.env.FAKE_LARK_ROOT
+    const stateFile = join(tmp, 'lark-state.json')
+    process.env.WIKI_LARK_BIN = join(ROOT, 'tests', 'fixtures', 'fake-lark-cli.mjs')
+    process.env.FAKE_LARK_STATE = stateFile
+    process.env.FAKE_LARK_ROOT = 'fldcnROOT'
+    await writeFile(stateFile, JSON.stringify({ files: {}, dirs: {}, nextId: 1 }))
+    try {
+      const feishuCache = join(tmp, 'feishu-cache')
+      const initR = await callRoute(route('/api/dsh-wiki/sync'), { method: 'POST', body: { op: 'feishu-init', name: '飞书库', newFolder: '永辉知识库', cacheDir: feishuCache, use: false } })
+      assert.equal(initR.body.ok, true, JSON.stringify(initR.body))
+      assert.match(initR.body.url, /feishu\.cn\/drive\/folder\//)
+
+      const st = await callRoute(route('/api/dsh-wiki/state'))
+      const entry = st.body.entries.find((x) => x.name === '飞书库')
+      assert.equal(entry.kind, 'feishu')
+      assert.ok(entry.folderToken, 'state 应带 folderToken')
+      assert.match(entry.folderUrl, /feishu\.cn\/drive\/folder\//)
+      assert.equal(entry.cacheDir, feishuCache, 'cacheDir 应为显式传入的隔离目录')
+      assert.match(core.defaultCloudDir('飞书库'), /wiki-cloud\/飞书库$/)
+
+      const status = await callRoute(route('/api/dsh-wiki/sync'), { url: '/api/dsh-wiki/sync?bundle=' + encodeURIComponent('飞书库') })
+      assert.equal(status.body.backend, 'feishu')
+      assert.equal(status.body.feishu.ok, true, JSON.stringify(status.body.feishu))
+      assert.equal(status.body.feishu.counts.push, 0, '空缓存 + 空远端 → 无待推送')
+
+      const badOp = await callRoute(route('/api/dsh-wiki/sync'), { method: 'POST', body: { op: 'clone', bundle: '飞书库' } })
+      assert.equal(badOp.body.ok, false)
+      await core.removeBundle('飞书库')
+    } finally {
+      for (const [k, v] of [['WIKI_LARK_BIN', prevBin], ['FAKE_LARK_STATE', prevState], ['FAKE_LARK_ROOT', prevRoot]]) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
   })
 
   test('settings 服务缺席时：不注册命名空间（卡片不出现），工具与 RPC 照常', async () => {
@@ -286,7 +326,7 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     await settle()
     assert.equal(bare.registered.length, 0)
     assert.equal(bare.tools.size, 14)
-    assert.ok(bare.routes.has('/api/dsh-wiki/state') && bare.routes.has('/api/dsh-wiki/git'))
+    assert.ok(bare.routes.has('/api/dsh-wiki/state') && bare.routes.has('/api/dsh-wiki/sync'))
     const st = await callRoute(bare.routes.get('/api/dsh-wiki/state'))
     assert.equal(st.body.ok, true)
   })

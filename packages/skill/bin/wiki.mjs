@@ -15,8 +15,10 @@
  *   wiki rules DIR [--dataDir DIR]
  *   wiki dirs [--dataDir DIR]
  *   wiki use NAME [--global] [--dataDir DIR]
- *   wiki sync [status] [--message M] [--dataDir DIR] [--wiki NAME]
- *   wiki sync init --remote URL [--branch B] [--name N] [--use]
+ *   wiki sync [status|pull|push] [--message M] [--dataDir DIR] [--wiki NAME]
+ *   wiki sync init --remote URL [--branch B] [--name N] [--use]          # 本地目录 → Git 远端
+ *   wiki sync init --folder-token URL|TOKEN [--name N] [--cache-dir D] [--use]   # 飞书云盘库
+ *   wiki sync init --new-folder 名称 --name N [--cache-dir D] [--use]    # 飞书新建文件夹
  *   wiki sync clone URL DIR [--name N] [--use]
  *
  * 环境变量 WIKI_DATA_DIR 可覆盖默认数据目录 ~/.agents/wiki。
@@ -102,6 +104,43 @@ function bodyFrom(p) {
   return p
 }
 
+/** 飞书同步结果文本化。 */
+function printFeishu(action, r) {
+  if (action === 'status') {
+    if (!r.ok) {
+      console.log(`在线库状态：不可用\n- ${r.error}${r.next ? `\n- 下一步：${r.next}` : ''}`)
+      return
+    }
+    const c = r.counts || {}
+    console.log(`在线库状态：待推送 ${c.push} / 待拉取 ${c.pull} / 冲突 ${c.conflict}｜本地 ${c.local} 个 .md，远端 ${c.remote} 个 .md`)
+    if (r.push.length) console.log(`- 待推送：${r.push.map((x) => x.rel).slice(0, 8).join('、')}${r.push.length > 8 ? ' …' : ''}`)
+    if (r.pull.length) console.log(`- 待拉取：${r.pull.map((x) => x.rel).slice(0, 8).join('、')}${r.pull.length > 8 ? ' …' : ''}`)
+    if (r.conflict.length) console.log(`- 冲突（两侧都改）：${r.conflict.map((x) => x.rel).join('、')}`)
+    if (r.remoteDeleted.length) console.log(`- 远端已删（本地保留）：${r.remoteDeleted.join('、')}`)
+    if (r.ignored && r.ignored.length) console.log(`- 已忽略的非 .md 资源：${r.ignored.slice(0, 5).join('、')}`)
+    return
+  }
+  if (r.ok) {
+    if (action === 'init') {
+      console.log(`飞书在线库初始化完成：${r.name} → ${r.url}`)
+      console.log(`- 本地缓存：${r.cacheDir}`)
+      console.log('（接着执行 wiki sync 会把本地内容推上去）')
+      return
+    }
+    console.log(`${action === 'pull' ? '拉取完成' : action === 'push' ? '推送完成' : '同步完成'}${r.bundle ? `：${r.bundle.name}` : ''}`)
+    if (r.pushed && r.pushed.length) console.log(`- 推送 ${r.pushed.length} 个文件（新增 ${(r.created || []).length}）`)
+    if (r.pulled && r.pulled.length) console.log(`- 拉取 ${r.pulled.length} 个文件`)
+    if (r.after) console.log(`- 现在：待推送 ${r.after.push} / 待拉取 ${r.after.pull} / 冲突 ${r.after.conflict}`)
+    for (const s of r.steps || []) console.log(`  · ${s}`)
+    if (r.backups && r.backups.length) console.log(`- 覆盖前备份：${r.backups.slice(0, 3).join('、')}`)
+    return
+  }
+  console.error(`${action}失败（${r.step || 'unknown'}）：${r.error || '未知错误'}`)
+  if (r.conflicts && r.conflicts.length) console.error(`- 冲突文件：${r.conflicts.join('、')}`)
+  if (r.failed && r.failed.length) console.error(`- 失败文件：${r.failed.slice(0, 5).map((f) => f.rel).join('、')}`)
+  if (r.next) console.error(`- 下一步：${r.next}`)
+}
+
 /** wiki sync 结果文本化（与 DSH/pi 形态语义一致）。 */
 function printSync(action, r) {
   if (action === 'status') {
@@ -140,7 +179,10 @@ async function main() {
   const args = process.argv.slice(2)
   const cmd = args[0]
   const rest = args.slice(1)
-  const { path: dataDir } = await resolveDataDir(args, core)
+  const resolvedBundle = await resolveDataDir(args, core)
+  const dataDir = resolvedBundle.path
+  const isFeishu = resolvedBundle.kind === 'feishu'
+  const resolved = resolvedBundle
 
   const fmtTitle = (c) => `${c.strong ? '★' : ''}${c.type}: ${c.title}  (${c.id})\n    ${c.description || ''}`
 
@@ -264,7 +306,8 @@ async function main() {
     }
     case 'sync': {
       const pos = positional(rest)
-      const sub = ['status', 'sync', 'init', 'clone'].includes(pos[0]) ? pos[0] : 'sync'
+      const sub = ['status', 'sync', 'pull', 'push', 'init', 'clone'].includes(pos[0]) ? pos[0] : 'sync'
+
       if (sub === 'clone') {
         const url = pos[1] || arg(rest, '--url')
         const dir = pos[2] || arg(rest, '--dir')
@@ -277,6 +320,23 @@ async function main() {
         if (!r.ok) process.exit(1)
         break
       }
+
+      const folderToken = arg(rest, '--folder-token')
+      const newFolder = arg(rest, '--new-folder')
+
+      if (sub === 'init' && (folderToken || newFolder)) {
+        const r = await core.feishuInit({
+          name: arg(rest, '--name'),
+          folderToken,
+          newFolder,
+          cacheDir: arg(rest, '--cache-dir'),
+          use: has(rest, '--use'),
+        })
+        printFeishu('init', r)
+        if (!r.ok) process.exit(1)
+        break
+      }
+
       if (sub === 'init') {
         const r = await core.gitInit(dataDir, {
           remote: arg(rest, '--remote'),
@@ -288,14 +348,46 @@ async function main() {
         if (!r.ok) process.exit(1)
         break
       }
+
+      // 其余动作：按 bundle 后端分派
+      if (isFeishu) {
+        if (sub === 'status') {
+          const r = await core.feishuStatus(resolved)
+          printFeishu('status', r)
+          if (!r.ok) process.exit(1)
+          break
+        }
+        if (sub === 'pull' || sub === 'push') {
+          const before = await core.feishuStatus(resolved)
+          if (!before.ok) {
+            printFeishu(sub, before)
+            process.exit(1)
+          }
+          if (sub === 'push' && before.conflict.length) {
+            printFeishu('push', { ok: false, step: 'conflict', conflicts: before.conflict.map((x) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: '请先人工处理冲突（飞书或本地任选一侧）再重跑。' })
+            process.exit(1)
+          }
+          const r = sub === 'pull'
+            ? await core.feishuPull(resolved, { paths: before.pull.map((x) => x.rel) })
+            : await core.feishuPush(resolved, { paths: before.push.map((x) => x.rel) })
+          printFeishu(sub, { ...r, bundle: resolved })
+          if (!r.ok) process.exit(1)
+          break
+        }
+        const r = await core.feishuSync(resolved, { adopt: arg(rest, '--adopt') })
+        printFeishu('sync', { ...r, bundle: resolved })
+        if (!r.ok) process.exit(1)
+        break
+      }
+
       if (sub === 'status') {
         const r = await core.gitStatus(dataDir)
         printSync('status', r)
         if (!r.ok) process.exit(1)
         break
       }
-      const r = await core.gitSync(dataDir, { message: arg(rest, '--message') })
-      printSync('sync', { ...r, bundle: { name: '', path: dataDir } })
+      const r = await core.gitSync(dataDir, { message: arg(rest, '--message'), push: sub !== 'pull' })
+      printSync(sub, { ...r, bundle: { name: '', path: dataDir } })
       if (!r.ok) process.exit(1)
       break
     }
@@ -307,7 +399,10 @@ async function main() {
     }
     case 'dirs': {
       const rows = await core.listBundles({ dataDir: dataDirFromArgs(args) })
-      for (const r of rows) console.log(`${r.active ? '*' : ' '} [${r.name}] ${r.path}${r.active ? '  ← 全局默认' : ''}`)
+      for (const r of rows) {
+        const kind = r.kind === 'feishu' ? '飞书 ' : ''
+        console.log(`${r.active ? '*' : ' '} ${kind}[${r.name}] ${r.path}${r.active ? '  ← 全局默认' : ''}`)
+      }
       console.log(`\n当前生效目录：${dataDir}`)
       console.log('\n切换：wiki use <name> [--global]；注册新目录：编辑 ~/.agents/wiki-registry.json（详见 wiki help bundle）')
       break
@@ -332,8 +427,10 @@ async function main() {
     default:
       console.log(`wiki CLI — llm-wiki core 工具
 用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|index|dirs|use|sync|help> [args] [--dataDir DIR] [--wiki NAME]
-       wiki sync [status] | wiki sync init --remote URL | wiki sync clone URL DIR [--name N] [--use]
-主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle|sync]`)
+       wiki sync [status|pull|push] [--message M] | wiki sync init --remote URL
+       wiki sync init --folder-token URL|TOKEN [--name N] | wiki sync init --new-folder 名称 --name N
+       wiki sync clone URL DIR [--name N] [--use]
+主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle|sync|feishu]`)
       process.exit(cmd ? 1 : 0)
   }
 }

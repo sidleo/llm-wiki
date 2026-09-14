@@ -201,8 +201,11 @@ window.__ModuleLoader__.load({
 			const [confirmingRemove, setConfirmingRemove] = react.default.useState("");
 			const [addName, setAddName] = react.default.useState("");
 			const [addPath, setAddPath] = react.default.useState("");
+			const [addKind, setAddKind] = react.default.useState("local");
+			const [addFolder, setAddFolder] = react.default.useState("");
+			const [newFolderName, setNewFolderName] = react.default.useState("");
 			const [viewBundle, setViewBundle] = react.default.useState("");
-			const [gitInfo, setGitInfo] = react.default.useState(null);
+			const [syncInfo, setSyncInfo] = react.default.useState(null);
 			const [health, setHealth] = react.default.useState(null);
 			const [remoteUrl, setRemoteUrl] = react.default.useState("");
 			const [cloneUrl, setCloneUrl] = react.default.useState("");
@@ -235,25 +238,27 @@ window.__ModuleLoader__.load({
 				run,
 				load
 			]);
-			const loadGit = react.default.useCallback(async (bundle) => {
-				const r = await api(`/git${bundle ? `?bundle=${encodeURIComponent(bundle)}` : ""}`);
-				setGitInfo(r.git);
+			const loadSync = react.default.useCallback(async (bundle) => {
+				const r = await api(`/sync${bundle ? `?bundle=${encodeURIComponent(bundle)}` : ""}`);
+				setSyncInfo(r);
 			}, []);
 			react.default.useEffect(() => {
 				if (!open) return;
-				run(() => loadGit(viewBundle));
+				run(() => loadSync(viewBundle));
 				setHealth(null);
 			}, [
 				open,
 				viewBundle,
 				run,
-				loadGit
+				loadSync
 			]);
 			const bundleNames = state ? state.entries.map((x) => x.name) : [];
+			const activeEntry = state ? state.entries.find((x) => x.name === viewBundle) : null;
+			const isFeishu = Boolean(activeEntry && activeEntry.kind === "feishu");
 			const afterMutation = async (message) => {
 				setNotice(message);
 				await load();
-				await loadGit(viewBundle);
+				await loadSync(viewBundle);
 			};
 			if (!open) {
 				const summary = state ? `默认：${state.active.name}（${state.active.path}）｜${state.entries.length} 个命名目录` : "展开以查看/管理知识库目录与同步";
@@ -307,17 +312,33 @@ window.__ModuleLoader__.load({
 				}),
 				onAskRemove: (name) => setConfirmingRemove(name),
 				onCancelRemove: () => setConfirmingRemove("")
-			})) : e("li", { className: "dwHint" }, "尚未注册任何命名目录。")) : e("div", { className: "dwHint" }, "正在读取…"), e("div", { className: "dwGrid" }, e(Field, {
+			})) : e("li", { className: "dwHint" }, "尚未注册任何命名目录。")) : e("div", { className: "dwHint" }, "正在读取…"), e("div", {
+				className: "dwCheck",
+				style: { marginBottom: 6 }
+			}, e("span", null, "新增类型："), e("button", {
+				className: addKind === "local" ? "dwBtn dwBtnPrimary" : "dwBtn",
+				disabled: busy,
+				onClick: () => setAddKind("local")
+			}, "本地目录"), e("button", {
+				className: addKind === "feishu" ? "dwBtn dwBtnPrimary" : "dwBtn",
+				disabled: busy,
+				onClick: () => setAddKind("feishu")
+			}, "飞书云盘库")), e("div", { className: "dwGrid" }, e(Field, {
 				label: "名称",
 				value: addName,
-				placeholder: "如 永辉",
+				placeholder: addKind === "feishu" ? "如 飞书库" : "如 永辉",
 				onChange: setAddName
-			}), e(Field, {
+			}), addKind === "local" ? e(Field, {
 				label: "目录（绝对路径或 ~/…）",
 				value: addPath,
 				placeholder: "/Users/you/Documents/llm-wiki",
 				onChange: setAddPath
-			})), e("button", {
+			}) : e(Field, {
+				label: "飞书文件夹 URL 或 token",
+				value: addFolder,
+				placeholder: "https://feishu.cn/drive/folder/fldcnXXX",
+				onChange: setAddFolder
+			})), addKind === "local" ? e("button", {
 				className: "dwBtn",
 				disabled: busy || !addName || !addPath,
 				onClick: () => run(async () => {
@@ -328,11 +349,46 @@ window.__ModuleLoader__.load({
 					});
 					setAddName("");
 					setAddPath("");
-					await afterMutation("已注册目录");
+					await afterMutation("已注册本地目录");
 				})
-			}, "＋ 添加目录")), e(Section, {
-				title: "在线同步（Git 远端）",
-				hint: "多台机器/多人共享同一份知识库：index.md 自动重生成、log.md 取并集 → 不阻塞；概念冲突会停止并列出文件（工作区回到同步前）。"
+			}, "＋ 添加本地目录") : e("div", null, e("button", {
+				className: "dwBtn",
+				disabled: busy || !addName || !addFolder,
+				onClick: () => run(async () => {
+					await post("/bundles", {
+						op: "add",
+						name: addName,
+						kind: "feishu",
+						folderToken: addFolder
+					});
+					setAddName("");
+					setAddFolder("");
+					await afterMutation("已挂载飞书文件夹");
+				})
+			}, "＋ 挂载已有文件夹"), e("div", {
+				className: "dwGrid",
+				style: { marginTop: 8 }
+			}, e(Field, {
+				label: "新建文件夹名称（建在「我的空间」根）",
+				value: newFolderName,
+				placeholder: "永辉知识库",
+				onChange: setNewFolderName
+			})), e("button", {
+				className: "dwBtn",
+				disabled: busy || !addName || !newFolderName,
+				onClick: () => run(async () => {
+					const r = await post("/sync", {
+						op: "feishu-init",
+						name: addName,
+						newFolder: newFolderName
+					});
+					setNotice(`已在飞书新建文件夹：${r.url || newFolderName}`);
+					setNewFolderName("");
+					await afterMutation("已注册飞书云盘库（首次同步会把本地内容推上去）");
+				})
+			}, "在飞书新建文件夹并注册"))), e(Section, {
+				title: "在线同步",
+				hint: isFeishu ? "飞书云盘库：文件级增量（只推改动文件），index.md 本地重生成、log.md 取并集；两侧都改会停下来报清单，永不删除两端文件。" : "Git 远端：index.md 自动重生成、log.md 取并集 → 不阻塞；概念冲突会停止并列出文件（工作区回到同步前）。"
 			}, e("div", {
 				className: "dwCheck",
 				style: { marginBottom: 6 }
@@ -341,14 +397,60 @@ window.__ModuleLoader__.load({
 				value: viewBundle,
 				disabled: busy || !bundleNames.length,
 				onChange: (ev) => setViewBundle(ev.target.value)
-			}, bundleNames.map((n) => e("option", {
-				key: n,
-				value: n
-			}, n))), e("button", {
+			}, bundleNames.map((n) => {
+				const entry = state.entries.find((x) => x.name === n);
+				return e("option", {
+					key: n,
+					value: n
+				}, `${n}${entry && entry.kind === "feishu" ? "（飞书）" : ""}`);
+			})), e("button", {
 				className: "dwBtn",
 				disabled: busy,
-				onClick: () => run(() => loadGit(viewBundle))
-			}, "刷新状态")), state && state.git && state.git.ok === false ? e("div", { className: "dwWarn" }, `✕ ${state.git.error || "git 不可用"}`) : null, gitInfo ? gitInfo.ok ? e("div", null, e("div", { className: "dwHint" }, `远端：${gitInfo.remote || "（未配置）"}｜分支：${gitInfo.branch || "(detached)"}${gitInfo.upstream ? ` → ${gitInfo.upstream}` : ""}｜领先 ${gitInfo.ahead} / 落后 ${gitInfo.behind}｜改动 ${gitInfo.dirty.length} 个文件`), gitInfo.lastCommit ? e("div", { className: "dwHint" }, `最后提交：${gitInfo.lastCommit}`) : null, gitInfo.conflicts && gitInfo.conflicts.length ? e("div", { className: "dwWarn" }, `存在冲突：${gitInfo.conflicts.join("、")}`) : null) : e("div", null, e("div", { className: "dwHint" }, gitInfo.error || "git 状态不可用"), gitInfo.next ? e("div", { className: "dwHint" }, gitInfo.next) : null) : e("div", { className: "dwHint" }, "正在读取 git 状态…"), e("div", { style: {
+				onClick: () => run(() => loadSync(viewBundle))
+			}, "刷新状态")), isFeishu ? e("div", null, syncInfo && syncInfo.feishu && syncInfo.feishu.ok ? e("div", null, e("div", { className: "dwHint" }, `待推送 ${syncInfo.feishu.counts.push}｜待拉取 ${syncInfo.feishu.counts.pull}｜冲突 ${syncInfo.feishu.counts.conflict}｜本地 ${syncInfo.feishu.counts.local} 个 .md，远端 ${syncInfo.feishu.counts.remote} 个 .md`), activeEntry && activeEntry.folderUrl ? e("div", { className: "dwHint" }, `文件夹：${activeEntry.folderUrl}`) : null, activeEntry && activeEntry.cacheDir ? e("div", { className: "dwHint" }, `本地缓存：${activeEntry.cacheDir}`) : null, syncInfo.feishu.conflict.length ? e("div", { className: "dwWarn" }, `冲突（两侧都改，需人工处理）：${syncInfo.feishu.conflict.map((x) => x.rel).join("、")}`) : null, syncInfo.feishu.remoteDeleted.length ? e("div", { className: "dwHint" }, `远端已删（本地保留）：${syncInfo.feishu.remoteDeleted.join("、")}`) : null, syncInfo.feishu.ignored && syncInfo.feishu.ignored.length ? e("div", { className: "dwHint" }, `已忽略的非 .md 资源：${syncInfo.feishu.ignored.slice(0, 5).join("、")}`) : null) : e("div", null, e("div", { className: "dwHint" }, syncInfo && syncInfo.feishu && syncInfo.feishu.error || "飞书状态不可用（需要 lark-cli 已登录）"), syncInfo && syncInfo.feishu && syncInfo.feishu.next ? e("div", { className: "dwHint" }, syncInfo.feishu.next) : null), e("div", { style: {
+				display: "flex",
+				gap: 8,
+				flexWrap: "wrap",
+				marginTop: 8
+			} }, e("button", {
+				className: "dwBtn dwBtnPrimary",
+				disabled: busy || !(syncInfo && syncInfo.feishu && syncInfo.feishu.ok),
+				onClick: () => run(async () => {
+					const r = await post("/sync", {
+						op: "sync",
+						bundle: viewBundle
+					});
+					setNotice(`同步完成：推送 ${(r.pushed || []).length}，拉取 ${(r.pulled || []).length}`);
+					await loadSync(viewBundle);
+				})
+			}, "一键同步"), e("button", {
+				className: "dwBtn",
+				disabled: busy || !(syncInfo && syncInfo.feishu && syncInfo.feishu.ok),
+				onClick: () => run(async () => {
+					const r = await post("/sync", {
+						op: "pull",
+						bundle: viewBundle
+					});
+					setNotice(`已拉取 ${(r.pulled || []).length} 个文件`);
+					await loadSync(viewBundle);
+				})
+			}, "拉取"), e("button", {
+				className: "dwBtn",
+				disabled: busy || !(syncInfo && syncInfo.feishu && syncInfo.feishu.ok),
+				onClick: () => run(async () => {
+					const r = await post("/sync", {
+						op: "push",
+						bundle: viewBundle
+					});
+					setNotice(`已推送 ${(r.pushed || []).length} 个文件`);
+					await loadSync(viewBundle);
+				})
+			}, "推送"), activeEntry && activeEntry.folderUrl ? e("a", {
+				className: "dwBtn",
+				href: activeEntry.folderUrl,
+				target: "_blank",
+				rel: "noreferrer"
+			}, "在飞书中打开") : null)) : e("div", null, state && state.git && state.git.ok === false ? e("div", { className: "dwWarn" }, `✕ ${state.git.error || "git 不可用"}`) : null, syncInfo && syncInfo.git ? syncInfo.git.ok ? e("div", null, e("div", { className: "dwHint" }, `远端：${syncInfo.git.remote || "（未配置）"}｜分支：${syncInfo.git.branch || "(detached)"}${syncInfo.git.upstream ? ` → ${syncInfo.git.upstream}` : ""}｜领先 ${syncInfo.git.ahead} / 落后 ${syncInfo.git.behind}｜改动 ${syncInfo.git.dirty.length} 个文件`), syncInfo.git.lastCommit ? e("div", { className: "dwHint" }, `最后提交：${syncInfo.git.lastCommit}`) : null, syncInfo.git.conflicts && syncInfo.git.conflicts.length ? e("div", { className: "dwWarn" }, `存在冲突：${syncInfo.git.conflicts.join("、")}`) : null) : e("div", null, e("div", { className: "dwHint" }, syncInfo.git.error || "git 状态不可用"), syncInfo.git.next ? e("div", { className: "dwHint" }, syncInfo.git.next) : null) : e("div", { className: "dwHint" }, "正在读取 git 状态…"), e("div", { style: {
 				display: "flex",
 				gap: 8,
 				flexWrap: "wrap",
@@ -357,18 +459,18 @@ window.__ModuleLoader__.load({
 				className: "dwBtn dwBtnPrimary",
 				disabled: busy,
 				onClick: () => run(async () => {
-					const r = await post("/git", {
+					const r = await post("/sync", {
 						op: "sync",
 						bundle: viewBundle
 					});
 					setNotice(`已同步${r.merged ? "（含远端合并）" : ""}${r.pushed ? " 并推送" : ""}`);
-					await loadGit(viewBundle);
+					await loadSync(viewBundle);
 				})
-			}, gitInfo && gitInfo.ok ? "立即同步" : "重试同步"), gitInfo && gitInfo.ok ? null : e("button", {
+			}, syncInfo && syncInfo.git && syncInfo.git.ok ? "立即同步" : "重试同步"), syncInfo && syncInfo.git && syncInfo.git.ok ? null : e("button", {
 				className: "dwBtn",
 				disabled: busy || !remoteUrl,
 				onClick: () => run(async () => {
-					await post("/git", {
+					await post("/sync", {
 						op: "init",
 						bundle: viewBundle,
 						remote: remoteUrl
@@ -376,7 +478,7 @@ window.__ModuleLoader__.load({
 					setRemoteUrl("");
 					await afterMutation("已初始化远端并首推");
 				})
-			}, "初始化远端并首推")), gitInfo && gitInfo.ok ? null : e(Field, {
+			}, "初始化远端并首推")), syncInfo && syncInfo.git && syncInfo.git.ok ? null : e(Field, {
 				label: "远端 URL（init 用）",
 				value: remoteUrl,
 				placeholder: "git@host:group/wiki.git",
@@ -410,7 +512,7 @@ window.__ModuleLoader__.load({
 				className: "dwBtn",
 				disabled: busy || !cloneUrl || !cloneDir,
 				onClick: () => run(async () => {
-					await post("/git", {
+					await post("/sync", {
 						op: "clone",
 						url: cloneUrl,
 						dir: cloneDir,
@@ -423,7 +525,7 @@ window.__ModuleLoader__.load({
 					setShowClone(false);
 					await afterMutation("已克隆并登记");
 				})
-			}, "开始克隆")) : null), e(Section, {
+			}, "开始克隆")) : null)), e(Section, {
 				title: "体检与索引",
 				hint: "只读校验 + 显式重建 index.md（派生文件）。"
 			}, e("div", { style: {

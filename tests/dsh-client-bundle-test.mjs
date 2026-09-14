@@ -95,7 +95,8 @@ describe('DSH 配置卡片（jsdom 渲染冒烟）', { skip }, () => {
     const git = { ok: true, remote: 'origin', branch: 'main', upstream: 'origin/main', ahead: 1, behind: 0, dirty: [' M log.md'], conflicts: [], lastCommit: 'abc1234 2026-01-01 wiki: sync' }
     global.fetch = async (url) => {
       calls.push(String(url))
-      const body = String(url).includes('/git') ? { ok: true, bundle: state.active, git } : state
+      const u = String(url)
+      const body = u.includes('/sync') ? { ok: true, bundle: state.active, backend: 'git', git } : state
       return { ok: true, status: 200, json: async () => body }
     }
 
@@ -150,7 +151,7 @@ describe('DSH 配置卡片（jsdom 渲染冒烟）', { skip }, () => {
       await new Promise((r) => setTimeout(r, 40))
     })
     const text = container.textContent
-    for (const title of ['命名目录（bundle）', '在线同步（Git 远端）', '体检与索引']) {
+    for (const title of ['命名目录（bundle）', '在线同步', '体检与索引']) {
       assert.ok(text.includes(title), `缺少区块：${title}\n${text.slice(0, 400)}`)
     }
     assert.equal(text.includes('运行参数'), false, '运行参数区应已删除')
@@ -159,8 +160,10 @@ describe('DSH 配置卡片（jsdom 渲染冒烟）', { skip }, () => {
     assert.ok(text.includes('origin') && text.includes('领先 1'), 'git 状态未渲染')
     assert.ok(text.includes('/tmp/wiki-registry.json'), '注册表路径未渲染')
     assert.ok(calls.some((u) => u.includes('/api/dsh-wiki/state')), '未读取 /state')
-    assert.ok(calls.some((u) => u.includes('/api/dsh-wiki/git')), '未读取 /git')
+    assert.ok(calls.some((u) => u.includes('/api/dsh-wiki/sync')), '未读取 /sync')
     assert.equal(calls.some((u) => u.includes('/api/dsh-wiki/config')), false, '不应再调用 /config')
+    // 新增表单支持两种后端
+    assert.ok(text.includes('本地目录') && text.includes('飞书云盘库'), '缺少新增类型切换（本地/飞书）')
   })
 
   test('teardown', async () => {

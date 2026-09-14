@@ -6,7 +6,7 @@
  * 不依赖猜测。内容随本项目规范版本走（SPEC-EXTENSIONS.md 的执行摘要）。
  */
 
-export const HELP_TOPICS = ['quickstart', 'files', 'agents', 'append', 'frontmatter', 'gate', 'bundle', 'sync']
+export const HELP_TOPICS = ['quickstart', 'files', 'agents', 'append', 'frontmatter', 'gate', 'bundle', 'sync', 'feishu']
 
 function doc(title, body) {
   return `# ${title}\n\n${body.trim()}\n`
@@ -26,7 +26,7 @@ const SECTIONS = {
 5. 写入：wiki_create / wiki_update；停用：wiki_deprecate；查规则：wiki_rules
 6. 多目录：wiki_dirs 查看分支，wiki_use <name> [global: true] 切换
 
-更多主题：wiki help files | agents | append | frontmatter | gate | bundle | sync`,
+更多主题：wiki help files | agents | append | frontmatter | gate | bundle | sync（Git 远端）| feishu（飞书在线库）`,
   ),
 
   files: doc(
@@ -149,6 +149,48 @@ computation（计算文件路径，缺省用正文 # Computation 代码块）、
 - CLI：wiki dirs 查看 / wiki use NAME [--global] 切换；每条命令可 --wiki NAME 指定
 
 解析顺序（无显式 name）：注册表 active（若为已知名字）→ default。`,
+  ),
+
+  feishu: doc(
+    '飞书在线知识库（云盘文件夹 + 原生 .md）',
+    `
+在线库 = 飞书云空间里的一个文件夹，里面就是一组**原生 .md 文件**（目录结构与本地 bundle 同构），
+所以 OKF v0.2 格式零损失：frontmatter / 目录 / 链接 / index / log / lint 全部照旧。
+
+## 起步
+
+- 新建在线库：wiki sync init --new-folder 永辉知识库 --name 飞书库 [--use]
+  （在“我的空间”根建同名文件夹并注册命名 bundle；私有，仅你可见）
+- 挂已有文件夹：wiki sync init --folder-token https://feishu.cn/drive/folder/fldcnXXXX --name 飞书库
+- 多机/多人：另一台机器执行 wiki sync init --folder-token <URL> --name 飞书库，
+  首次 wiki sync 会把远端内容拉到本地缓存（~/.agents/wiki-cloud/<名字>/）
+
+## 日常
+
+- wiki sync status —— 只读：待推送 / 待拉取 / 两侧都改（冲突）/ 远端已删 / 被忽略的非 .md 资源
+- wiki sync（或 wiki sync pull / wiki sync push）—— 推本地改动 + 拉远端改动
+
+## 怎么判断"谁改过"（三方状态）
+
+本地缓存里有一份 .wiki-cloud.json，记录上次同步时每个文件的
+{fileToken, 远端 modified_time, 本地 mtime/size}。据此判断：
+- 只有本地变 → 推（markdown +overwrite，只推这个文件）
+- 只有远端变 → 拉（覆盖前先备份到 .backup/<时间戳>/）
+- 两侧都变 → **冲突，停下来报清单**（index.md 例外：本地按目录树重生成；log.md 例外：取并集）
+
+## 安全边界
+
+- **永不删除远端文件、永不因拉取删本地文件**；v1 不同步删除，只在 status 里报告差异。
+- 不保存任何 token：认证归 lark-cli（user 身份）；注册表只存 folderToken（权限在飞书侧）。
+- 冲突不静默、不 force：任何一侧都不会被自动覆盖。
+- 人是浏览者：在飞书云空间看/下载即可；写入由 agent 通过本工具完成。
+
+## 成本与依赖
+
+- 首次同步 = 逐文件上传/下载（上百文件需要几分钟），之后只传改动文件。
+- 依赖 lark-cli 已登录（lark-cli auth login）；缺 scope 时按报错提示补授权。
+- 需要"知识库侧边栏"体验或想让人直接在线编辑正文，那是另外两种形态：
+  飞书知识库节点（wiki）与多维表格（Base）——v1 未采用，见仓库 README 的取舍说明。`,
   ),
 
   sync: doc(

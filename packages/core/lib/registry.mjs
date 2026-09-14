@@ -86,15 +86,42 @@ export async function removeBundle(name) {
   return { removed: true, active: next.active }
 }
 
-/** 有效 bundle 表（name → 绝对路径）：注册表 ∪ 宿主 config.dataDirs（同名 config 优先）。 */
+/** 飞书后端的默认本地缓存目录：~/.agents/wiki-cloud/<bundle 名>（可被 cacheDir 覆盖）。 */
+export function defaultCloudDir(name) {
+  return join(homedir(), '.agents', 'wiki-cloud', String(name || 'cloud'))
+}
+
+/**
+ * 归一化 bundle 声明（两种形态共存）：
+ * - `"~/notes/wiki"`                        → 本地目录（历史形态，向后兼容）
+ * - `{ kind:'feishu', folderToken, cacheDir }` → 飞书云盘后端；本地工作目录 = cacheDir
+ * 远程后端的 `path` 一律指向**本地缓存目录**，于是 core 的读写/校验全部照旧在目录上跑。
+ * @param {string|object} decl
+ * @param {{name?:string}} [opts]
+ * @returns {{kind:string, path:string, decl:string|object}|null}
+ */
+export function normalizeBundleSpec(decl, { name } = {}) {
+  if (typeof decl === 'string' && decl) return { kind: 'local', path: expandTilde(decl), decl }
+  if (decl && typeof decl === 'object' && !Array.isArray(decl)) {
+    const kind = decl.kind === 'feishu' ? 'feishu' : 'local'
+    const raw = kind === 'feishu' ? decl.cacheDir || defaultCloudDir(name) : decl.path
+    if (typeof raw !== 'string' || !raw) return null
+    return { kind, path: expandTilde(raw), decl }
+  }
+  return null
+}
+
+/** 有效 bundle 表（name → 归一化 spec）：注册表 ∪ 宿主 config.dataDirs（同名 config 优先）。 */
 export async function effectiveBundles(config = {}) {
   const reg = await readRegistry()
   const out = {}
-  for (const [name, p] of Object.entries(reg.bundles || {})) {
-    if (typeof p === 'string' && p) out[name] = expandTilde(p)
+  for (const [name, decl] of Object.entries(reg.bundles || {})) {
+    const spec = normalizeBundleSpec(decl, { name })
+    if (spec) out[name] = spec
   }
-  for (const [name, p] of Object.entries(config.dataDirs || {})) {
-    if (typeof p === 'string' && p) out[name] = expandTilde(p)
+  for (const [name, decl] of Object.entries(config.dataDirs || {})) {
+    const spec = normalizeBundleSpec(decl, { name })
+    if (spec) out[name] = spec
   }
   return out
 }
@@ -108,26 +135,33 @@ export function fallbackPath(config = {}) {
  * 解析当前 bundle 根。
  * @param {object} [config] 宿主配置（{ dataDir, dataDirs }）
  * @param {{ name?: string }} [opts] name=显式 bundle 名（缺省按注册表 active 或 default 解析）
- * @returns {Promise<{name: string, path: string}>}
+ * @returns {Promise<{name:string, kind:string, path:string, decl:string|object|null}>} feishu 时 path=本地缓存目录
  */
 export async function resolveBundleRoot(config = {}, { name } = {}) {
   const bundles = await effectiveBundles(config)
+  const local = { kind: 'local', path: fallbackPath(config), decl: null }
   if (name !== undefined && name !== null && name !== '') {
-    if (name === 'default') return { name: 'default', path: fallbackPath(config) }
-    if (bundles[name]) return { name, path: bundles[name] }
+    if (name === 'default') return { name: 'default', ...local }
+    if (bundles[name]) return { name, ...bundles[name] }
     throw new Error(`未知 bundle「${name}」。可用 wiki_dirs 查看已注册目录；注册方式见 wiki_help bundle。`)
   }
   const reg = await readRegistry()
-  if (reg.active === 'default') return { name: 'default', path: fallbackPath(config) }
-  if (reg.active && bundles[reg.active]) return { name: reg.active, path: bundles[reg.active] }
-  return { name: 'default', path: fallbackPath(config) }
+  if (reg.active === 'default') return { name: 'default', ...local }
+  if (reg.active && bundles[reg.active]) return { name: reg.active, ...bundles[reg.active] }
+  return { name: 'default', ...local }
 }
 
 /** 列出有效 bundle（含隐式 default）与全局默认激活项。 */
 export async function listBundles(config = {}) {
   const bundles = await effectiveBundles(config)
   const { name: activeName } = await resolveBundleRoot(config)
-  const rows = Object.entries(bundles).map(([name, path]) => ({ name, path, active: name === activeName }))
-  if (!bundles.default) rows.push({ name: 'default', path: fallbackPath(config), active: activeName === 'default' })
+  const rows = Object.entries(bundles).map(([name, spec]) => ({
+    name,
+    kind: spec.kind,
+    path: spec.path,
+    folderToken: spec.kind === 'feishu' && spec.decl ? spec.decl.folderToken : undefined,
+    active: name === activeName,
+  }))
+  if (!bundles.default) rows.push({ name: 'default', kind: 'local', path: fallbackPath(config), active: activeName === 'default' })
   return rows.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
 }

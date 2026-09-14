@@ -18,7 +18,10 @@
 - **生命周期**——`stale_after` 过期、`status: deprecated`（概念级）与目录级批量停用、自动维护 `index.md` / `log.md`。
 - **校验与体检**——`wiki_validate`（OKF 合规）与 `wiki_lint`（断链、孤儿页、过期、缺 index）。
 - **多目录（命名 bundle）**——注册多个 wiki 目录为命名分支，可切换（会话级或全局持久）。
-- **在线知识库（Git 远端同步）**——bundle 仍是本地 Markdown 目录树，挂上远端即可多机/多人/多个 agent 读写同一份：`wiki_sync`（或 `wiki sync`）提交→拉取合并→推送。`index.md` 自动重生成、`log.md` 取并集（并发写入不阻塞）；概念冲突会停止并报清单，工作区回滚到同步前，**绝不 force push**。
+- **在线知识库（两种后端）**——同一个 `wiki_sync` / `wiki sync` 入口，按 bundle 后端自动分派：
+  - **本地目录 + Git 远端**：提交→拉取合并→推送，多机/多人协作；**绝不 force push**。
+  - **飞书云盘库**：内容存在飞书云空间的文件夹里，就是**一组原生 `.md` 文件**（OKF 格式零损失），经 `lark-cli` 文件级增量读写；人在飞书里浏览/下载，agent 负责读与写。
+  两种后端同一套冲突规则：`index.md` 本地重生成、`log.md` 取并集（不阻塞）；概念 / `AGENTS.md` 两侧都改则**停止同步并报清单**，绝不自动覆盖。飞书后端**永不删除两端文件**（删除只报告）。
 - **图形化配置（DSH Web GUI）**——设置 → 插件 → 插件配置里的 llm-wiki 卡片：命名目录增删/改名/设默认、在线同步状态与一键同步/初始化/克隆、体检（validate/lint 计数 + 重建 index）。运行参数属部署级配置（profile 的 `cordis.patch.yml`），卡片刻意不提供编辑。
 
 ## Wiki 目录结构（bundle）
@@ -90,6 +93,24 @@ wiki sync --message "永辉口径补充"
 
 冲突策略：`index.md`（派生文件）同步时按目录树重新生成；`log.md`（追加式）按日期块取并集；概念 / `AGENTS.md` / `APPEND_SYSTEM_PROMPT.md` 属人工撰写内容，冲突时同步停止、报冲突清单并把工作区恢复到同步前（本地提交保留），人工解决后重跑即可。凭证交给 git（SSH agent / credential helper），本工具不保存 token，也绝不 force push。详见 `wiki help sync`。
 
+### 飞书在线知识库（云盘文件夹 + 原生 .md）
+
+```bash
+# 把现有本地库复刻成一个飞书在线库（默认 dry-run，--apply 才执行；copy 不 move）
+node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name 飞书库 --new-folder 永辉知识库 --apply
+
+# 或者：在「我的空间」新建文件夹并注册
+wiki sync init --new-folder 永辉知识库 --name 飞书库 --use
+# 挂已有文件夹 / 另一台机器
+wiki sync init --folder-token https://feishu.cn/drive/folder/fldcnXXXX --name 飞书库
+
+# 日常
+wiki sync status          # 待推送 / 待拉取 / 两侧都改 / 远端已删
+wiki sync                 # 推本地改动 + 拉远端改动（只传改动文件）
+```
+
+三方状态判定（本地缓存里的 `.wiki-cloud.json` 记录每文件的 fileToken、远端 modified_time、本地 mtime/size）：只有一侧变就单向传；两侧都变就停下来报冲突。拉取覆盖本地前会先备份到 `.backup/<时间戳>/`。依赖 `lark-cli` 已登录（`lark-cli auth login`）；详见 `wiki help feishu`。
+
 ### 图形化配置（DSH Web GUI）
 
 设置 → 插件 → 插件配置 → llm-wiki 卡片（ADR：宿主按「已服务设置命名空间 ∩ 已注册卡片」渲染，卡片 key = `dsh-wiki`）：
@@ -97,7 +118,8 @@ wiki sync --message "永辉口径补充"
 | 区块 | 能改什么 | 落到哪 |
 |------|----------|--------|
 | 命名目录 | 增删/改名/设默认 | `~/.agents/wiki-registry.json`（与 CLI/pi 共享，删除只摘注册不动数据） |
-| 在线同步 | 远端/分支/领先落后/冲突 + 同步/初始化/克隆 | 走 core `git.mjs`，与 `wiki_sync` 同一实现 |
+| 在线同步 | 按后端显示：Git（远端/分支/领先落后）或飞书（待推送/待拉取/冲突/文件夹链接）+ 同步/拉取/推送/初始化/克隆 | 走 core `git.mjs` / `feishu.mjs`，与 `wiki_sync` 同一实现 |
+| 命名目录 | 新增类型可选「本地目录」或「飞书云盘库」（可一键在飞书新建文件夹并注册） | `~/.agents/wiki-registry.json`（飞书条目为对象形态：kind/folderToken/cacheDir） |
 | 体检与索引 | validate/lint 计数与明细、重建 index | core `validateBundle`/`lintBundle`/`refreshIndex` |
 
 （运行参数不在卡片里：数据目录、注入 section 名/order、各上限、缓存 TTL 都是部署级配置，改 profile 的 `cordis.patch.yml`。）
@@ -148,6 +170,7 @@ node scripts/smoke-test.mjs              # 36 项：core 工具链 + 注册表 +
 node tests/dsh-mock-test.mjs             # 33 项：DSH 插件（mock 宿主）工具注册 + 注入分层 + 门控 + 多目录 + 同步诊断
 node --test tests/dsh-config-test.mjs    # 9 项：配置卡片宿主半（设置命名空间 + /api/dsh-wiki/* 路由）
 node --test tests/git-sync.test.mjs      # 8 项：Git 远端同步（顺序写/并发 log/index 冲突/概念冲突/错误路径）
+node --test tests/feishu-backend.test.mjs # 12 项：飞书云盘后端（三方差异/只推改动/冲突停止/log 并集/argv 安全黑名单）
 node --test tests/dsh-client-bundle-test.mjs   # 5 项：卡片产物契约 + jsdom 渲染冒烟
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 项：pi 扩展（mock pi）
 node --test tests/three-forms.test.mjs   # 5 项：三形态读写同一 bundle 一致性

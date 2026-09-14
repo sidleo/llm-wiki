@@ -6,7 +6,8 @@
  * 导出 9 个工具函数（与 wiki_* 工具一一对应）：
  *   list / search / get / create / update / validate / lint / ingest / deprecate
  * 加辅助：resolveRules（AGENTS.md 规则解析）、appendLog/updateIndex/refreshIndex（维护）、
- * git 远端同步（gitStatus/gitSync/gitInit/gitClone，在线知识库）、
+ * 两种在线后端：git（gitStatus/gitSync/gitInit/gitClone）与飞书云盘
+ * （feishuStatus/feishuSync/feishuPull/feishuPush/feishuInit）、
  * parseDoc/serializeDoc（格式工具，供上层自定义编辑）。
  */
 
@@ -24,8 +25,26 @@ export { renderIndexBody, writeDirIndex, updateIndex, refreshIndex, mergeLogText
 export { createConcept, updateConcept, deprecateDir, nowIso, checkId } from './lib/write.mjs'
 export { ingestSource } from './lib/ingest.mjs'
 
-// Git 远端同步（在线知识库）：headless、无三方依赖、凭证交给 git
+// Git 远端同步（在线知识库 · 本地目录后端）：headless、无三方依赖、凭证交给 git
 export { gitAvailable, gitStatus, gitSync, gitInit, gitClone, DEFAULT_GIT_TIMEOUT_MS } from './lib/git.mjs'
+
+// 飞书在线知识库（云盘文件夹 + 原生 .md 文件树后端）：经 lark-cli 读写，格式零损失
+export {
+  larkAvailable,
+  feishuInit,
+  feishuStatus,
+  feishuPull,
+  feishuPush,
+  feishuSync,
+  feishuListRemote,
+  feishuFolderUrl,
+  feishuParseFolderToken,
+  feishuCacheInfo,
+  feishuForget,
+  feishuSpecOf,
+  CLOUD_INDEX_FILE,
+  FEISHU_FULL_TIMEOUT_MS,
+} from './lib/feishu.mjs'
 
 // 命名 bundle 注册表：默认数据目录 ~/.agents/wiki + 多目录注册/切换（跨三形态）
 export {
@@ -37,6 +56,8 @@ export {
   removeBundle,
   expandTilde,
   effectiveBundles,
+  normalizeBundleSpec,
+  defaultCloudDir,
   fallbackPath,
   resolveBundleRoot,
   listBundles,

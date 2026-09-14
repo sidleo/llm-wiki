@@ -29,7 +29,9 @@
  * - 卡片本体在浏览器半 lib/client.js（src/client/index.ts 构建，见 tsdown.config.ts）。
  *   卡片 key 必须等于设置命名空间名：DSH 插件配置 Tab 只渲染 host 已服务命名空间的卡片。
  *
- * 在线同步：core git.mjs（Git 远端），agent 侧入口是 wiki_sync 工具。
+ * 在线同步：两种后端——本地目录 bundle 用 core git.mjs（Git 远端），
+ * 飞书 bundle（kind:'feishu'，云盘文件夹存原生 .md）用 core feishu.mjs；
+ * agent 侧同一入口 wiki_sync，按当前 bundle 的 kind 自动分派。
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
@@ -97,7 +99,7 @@ const SECTION_TEXT = [
   '- wiki_validate — OKF v0.2 合规校验；wiki_lint — 体检（断链/孤儿/过期/缺 index）',
   '- wiki_ingest — 登记外部源文件进 bundle；wiki_deprecate — 目录级批量停用（status: deprecated）',
   '- wiki_dirs — 查看已配置的目录分支；wiki_use <name> [global:true] — 切换当前分支（会话级/持久化全局默认）',
-  '- wiki_sync — 在线知识库（Git 远端同步）：status 看远端/ahead-behind/冲突；sync 提交+拉取合并+推送（概念冲突会停止并报清单，不 force）；init/clone 起步。冲突策略与安全边界见 wiki_help sync。',
+  '- wiki_sync — 在线知识库同步（按 bundle 后端分派）：本地目录走 Git 远端（status/sync/init/clone），飞书云盘库走 lark-cli（status/sync/pull/push/init，文件级增量、永不删两端）。冲突都停下来报清单，绝不 force/覆盖。见 wiki_help sync 与 wiki_help feishu。',
   '- 图形化配置：设置 → 插件 → 插件配置 → llm-wiki 卡片（命名目录管理 / 在线同步 / 体检与索引）；运行参数属部署级，改 profile 的 cordis.patch.yml。',
   '- wiki_help — 查机制文档（保留文件/怎么写 AGENTS.md/怎么写 APPEND_SYSTEM_PROMPT.md/frontmatter/门控/多目录）。想给某分类加行为规则 → 在该目录建 APPEND_SYSTEM_PROMPT.md（正文即追加的 system prompt）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节。详情 wiki help。',
 ].join('\n')
@@ -188,6 +190,37 @@ function jsonResponse(res, body, code = 200) {
   res.end(JSON.stringify(body))
 }
 
+/** 飞书同步结果文本化。 */
+function formatFeishuResult(action, r) {
+  const lines = []
+  if (action === 'status') {
+    if (!r.ok) return `在线库状态：不可用\n- ${r.error}${r.next ? `\n- 下一步：${r.next}` : ''}`
+    const c = r.counts || {}
+    lines.push(`在线库状态：待推送 ${c.push} / 待拉取 ${c.pull} / 冲突 ${c.conflict}｜本地 ${c.local} 个 .md，远端 ${c.remote} 个 .md`)
+    if (r.push.length) lines.push(`- 待推送：${r.push.map((x) => x.rel).slice(0, 8).join('、')}${r.push.length > 8 ? ' …' : ''}`)
+    if (r.pull.length) lines.push(`- 待拉取：${r.pull.map((x) => x.rel).slice(0, 8).join('、')}${r.pull.length > 8 ? ' …' : ''}`)
+    if (r.conflict.length) lines.push(`- 冲突（两侧都改）：${r.conflict.map((x) => x.rel).join('、')}`)
+    if (r.remoteDeleted.length) lines.push(`- 远端已删（本地保留，v1 不同步删除）：${r.remoteDeleted.join('、')}`)
+    if (r.ignored && r.ignored.length) lines.push(`- 已忽略的非 .md 资源：${r.ignored.slice(0, 5).join('、')}${r.ignored.length > 5 ? ' …' : ''}`)
+    return lines.join('\n')
+  }
+  if (r.ok) {
+    lines.push(`${action === 'init' ? '在线库初始化完成' : action === 'pull' ? '拉取完成' : action === 'push' ? '推送完成' : '同步完成'}${r.bundle ? `：${r.bundle.name}` : ''}`)
+    if (r.createdFolder) lines.push(`- 新建飞书文件夹：${r.createdFolder.name} → ${r.url}`)
+    if (r.pushed && r.pushed.length) lines.push(`- 推送 ${r.pushed.length} 个文件（新增 ${(r.created || []).length}）`)
+    if (r.pulled && r.pulled.length) lines.push(`- 拉取 ${r.pulled.length} 个文件`)
+    if (r.after) lines.push(`- 现在：待推送 ${r.after.push} / 待拉取 ${r.after.pull} / 冲突 ${r.after.conflict}`)
+    for (const st of r.steps || []) lines.push(`  · ${st}`)
+    if (r.backups && r.backups.length) lines.push(`- 覆盖前备份：${r.backups.slice(0, 3).join('、')}${r.backups.length > 3 ? ' …' : ''}`)
+    return lines.join('\n')
+  }
+  lines.push(`${action === 'init' ? '初始化' : action}失败（${r.step || 'unknown'}）：${r.error || '未知错误'}`)
+  if (r.conflicts && r.conflicts.length) lines.push(`- 冲突文件：${r.conflicts.join('、')}`)
+  if (r.failed && r.failed.length) lines.push(`- 失败文件：${r.failed.slice(0, 5).map((f) => f.rel).join('、')}`)
+  if (r.next) lines.push(`- 下一步：${r.next}`)
+  return lines.join('\n')
+}
+
 /** git 结果文本化（wiki_sync 工具与诊断共用）。 */
 function formatGitResult(action, r) {
   const lines = []
@@ -248,13 +281,20 @@ function registerWebRoutes(ctx, deps) {
       for (const n of names) {
         const fromConfig = Object.prototype.hasOwnProperty.call(declared, n)
         const raw = fromConfig ? declared[n] : reg.bundles[n]
-        const path = c.expandTilde(String(raw || ''))
+        const spec = c.normalizeBundleSpec(raw, { name: n })
+        if (!spec) continue
+        const path = spec.path
+        const decl = spec.decl && typeof spec.decl === 'object' ? spec.decl : {}
         entries.push({
           name: n,
+          kind: spec.kind,
           path,
           source: fromConfig ? 'config' : 'registry',
           shadowed: fromConfig && Object.prototype.hasOwnProperty.call(reg.bundles || {}, n),
           active: n === active.name,
+          ...(spec.kind === 'feishu'
+            ? { folderToken: decl.folderToken || '', folderUrl: decl.folderToken ? c.feishuFolderUrl(decl.folderToken) : '', cacheDir: path }
+            : {}),
           ...(await probeBundlePath(path)),
         })
       }
@@ -288,6 +328,8 @@ function registerWebRoutes(ctx, deps) {
           const err = validateBundleName(n)
           if (err) return jsonResponse(res, { ok: false, error: `${label}：${err}` }, 400)
         }
+        const prevDecl = op === 'rename' ? reg.bundles[name] : undefined
+        const prevSpec = op === 'rename' ? c.normalizeBundleSpec(prevDecl, { name }) : null
         if (op === 'rename') {
           if (!Object.prototype.hasOwnProperty.call(reg.bundles || {}, name)) {
             return jsonResponse(res, { ok: false, error: `注册表里没有「${name}」（部署配置声明的目录不可改名）` }, 400)
@@ -303,13 +345,28 @@ function registerWebRoutes(ctx, deps) {
             return jsonResponse(res, { ok: false, error: `「${nextName}」已存在：改用改名，或先删除该条目` }, 400)
           }
         }
-        const path = c.expandTilde(String(body.path || (op === 'rename' ? reg.bundles[name] : '')).trim())
-        if (!path) return jsonResponse(res, { ok: false, error: '目录路径不能为空' }, 400)
+
+        // 后端类型：默认沿用原条目（rename）或本地目录（add，提供了 path）
+        const kind = body.kind === 'feishu' ? 'feishu' : body.folderToken ? 'feishu' : prevSpec ? prevSpec.kind : 'local'
+        let spec
+        if (kind === 'feishu') {
+          const folderToken = c.feishuParseFolderToken(body.folderToken || (prevSpec && prevSpec.decl && prevSpec.decl.folderToken) || '')
+          if (!folderToken) return jsonResponse(res, { ok: false, error: '飞书库需要云盘文件夹 URL 或 token（或先用「在飞书新建文件夹」）' }, 400)
+          const prevCache = prevSpec && prevSpec.decl ? prevSpec.decl.cacheDir : ''
+          const cacheDir = String(body.cacheDir || '').trim() || (prevCache && prevCache !== c.defaultCloudDir(name) ? prevCache : c.defaultCloudDir(nextName))
+          spec = { kind: 'feishu', folderToken, cacheDir: c.expandTilde(cacheDir) }
+        } else {
+          const path = c.expandTilde(String(body.path || (prevSpec ? prevSpec.path : '')).trim())
+          if (!path) return jsonResponse(res, { ok: false, error: '目录路径不能为空' }, 400)
+          spec = path
+        }
+
         if (op === 'rename') await c.removeBundle(name)
-        await c.writeRegistry({ bundles: { [nextName]: path }, ...(op === 'rename' && reg.active === name ? { active: nextName } : {}) })
+        await c.writeRegistry({ bundles: { [nextName]: spec }, ...(op === 'rename' && reg.active === name ? { active: nextName } : {}) })
         invalidateCaches()
-        const probe = await probeBundlePath(path)
-        return jsonResponse(res, { ok: true, name: nextName, path, ...probe })
+        const resolved = await c.resolveBundleRoot(effectiveConfig(), { name: nextName })
+        const probe = await probeBundlePath(resolved.path)
+        return jsonResponse(res, { ok: true, name: nextName, kind: resolved.kind, path: resolved.path, ...probe })
       }
 
       if (op === 'remove') {
@@ -369,22 +426,34 @@ function registerWebRoutes(ctx, deps) {
     }
   })
 
-  // GET/POST /api/dsh-wiki/git —— GET 只读状态；POST 同步 / 初始化远端 / 克隆
+  // GET/POST /api/dsh-wiki/sync —— 在线同步（按 bundle 后端分派：git 仓库 / 飞书云盘库）
   // （同一路径只能注册一条路由：宿主按路径匹配，handler 内自行按 method 分派）
-  route('/api/dsh-wiki/git', async (req, res) => {
+  route('/api/dsh-wiki/sync', async (req, res) => {
     try {
       const c = await loadCore()
       const method = String((req && req.method) || 'GET').toUpperCase()
+      const isFeishu = (t) => t.kind === 'feishu'
 
       if (method === 'GET') {
         const url = new URL(req.url || '/', 'http://localhost')
         const t = await target(c, url.searchParams.get('bundle'))
-        const st = await c.gitStatus(t.path)
-        return jsonResponse(res, { ok: true, bundle: t, git: st })
+        if (isFeishu(t)) {
+          const feishu = await c.feishuStatus(t)
+          return jsonResponse(res, { ok: true, bundle: t, backend: 'feishu', feishu, url: t.decl && t.decl.folderToken ? c.feishuFolderUrl(t.decl.folderToken) : '' })
+        }
+        return jsonResponse(res, { ok: true, bundle: t, backend: 'git', git: await c.gitStatus(t.path) })
       }
 
       const body = await readJsonBody(req)
       const op = String(body.op || 'sync')
+
+      // 飞书后端初始化：新建/挂载云盘文件夹 + 注册命名 bundle（再首推由 op=sync 完成）
+      if (op === 'feishu-init') {
+        const r = await c.feishuInit({ name: body.name, folderToken: body.folderToken, newFolder: body.newFolder, cacheDir: body.cacheDir, label: body.label, use: body.use === true })
+        invalidateCaches()
+        return jsonResponse(res, r, r.ok ? 200 : 400)
+      }
+
       if (op === 'clone') {
         if (!body.url) return jsonResponse(res, { ok: false, error: 'clone 需要 url' }, 400)
         if (!body.dir) return jsonResponse(res, { ok: false, error: 'clone 需要目标目录 dir' }, 400)
@@ -392,16 +461,49 @@ function registerWebRoutes(ctx, deps) {
         invalidateCaches()
         return jsonResponse(res, r, r.ok ? 200 : 400)
       }
+
       const t = await target(c, body.bundle)
-      if (op === 'sync') {
-        const r = await c.gitSync(t.path, { message: body.message })
+
+      if (isFeishu(t)) {
+        if (op === 'status') {
+          const r = await c.feishuStatus(t)
+          return jsonResponse(res, { ...r, bundle: t, backend: 'feishu' }, r.ok ? 200 : 400)
+        }
+        if (op === 'pull') {
+          const before = await c.feishuStatus(t)
+          if (!before.ok) return jsonResponse(res, before, 400)
+          const paths = before.pull.map((x) => x.rel)
+          const r = await c.feishuPull(t, { paths })
+          invalidateCaches()
+          return jsonResponse(res, { ...r, bundle: t, files: paths.length }, r.ok ? 200 : 409)
+        }
+        if (op === 'push') {
+          const before = await c.feishuStatus(t)
+          if (!before.ok) return jsonResponse(res, before, 400)
+          if (before.conflict.length) {
+            return jsonResponse(res, { ok: false, step: 'conflict', conflicts: before.conflict.map((x) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: '请先人工处理冲突（飞书或本地任选一侧）再重跑。' }, 409)
+          }
+          const r = await c.feishuPush(t, { paths: before.push.map((x) => x.rel) })
+          invalidateCaches()
+          return jsonResponse(res, { ...r, bundle: t }, r.ok ? 200 : 409)
+        }
+        if (op === 'sync') {
+          const r = await c.feishuSync(t, { adopt: body.adopt, message: body.message })
+          invalidateCaches()
+          return jsonResponse(res, { ...r, bundle: t, backend: 'feishu' }, r.ok ? 200 : 409)
+        }
+        return jsonResponse(res, { ok: false, error: `飞书后端不支持操作：${op}（可用 status/pull/push/sync）` }, 400)
+      }
+
+      if (op === 'sync' || op === 'push' || op === 'pull') {
+        const r = await c.gitSync(t.path, { message: body.message, push: op !== 'pull' })
         invalidateCaches()
-        return jsonResponse(res, { ...r, bundle: t }, r.ok ? 200 : 409)
+        return jsonResponse(res, { ...r, bundle: t, backend: 'git' }, r.ok ? 200 : 409)
       }
       if (op === 'init') {
         const r = await c.gitInit(t.path, { remote: body.remote, branch: body.branch, name: body.name, use: body.use === true })
         invalidateCaches()
-        return jsonResponse(res, { ...r, bundle: t }, r.ok ? 200 : 400)
+        return jsonResponse(res, { ...r, bundle: t, backend: 'git' }, r.ok ? 200 : 400)
       }
       jsonResponse(res, { ok: false, error: `未知操作：${op}` }, 400)
     } catch (e) {
@@ -892,7 +994,7 @@ export function apply(ctx, config) {
           if (r.active) markers.push('全局默认')
           if (session && session.name === r.name) markers.push('当前会话')
           const m = markers.length ? `  ← ${markers.join(' / ')}` : ''
-          return `[${r.name}] ${r.path}${m}`
+          return `${r.kind === 'feishu' ? '飞书 ' : ''}[${r.name}] ${r.path}${m}`
         })
         lines.push('', `当前生效目录：${active.path}`)
         lines.push('', '切换：wiki_use <name> [global:true]；注册新目录：~/.agents/wiki-registry.json 或插件配置 dataDirs（详见 wiki_help bundle）。')
@@ -959,28 +1061,32 @@ export function apply(ctx, config) {
     },
   })
 
-  // —— wiki_sync ——
+  // —— wiki_sync ——（按 bundle 后端分派：本地目录→Git；飞书云盘库→lark-cli）
   ctx.tools.register({
     name: 'wiki_sync',
     description: [
-      '在线知识库（Git 远端同步）：多台机器/多人/多个 agent 读写同一份 bundle。',
-      'action=status 只读看远端/分支/ahead-behind/脏文件/冲突；action=sync 提交本地改动 + 拉取合并 + 推送；',
-      'action=init 给本地 bundle 挂远端并首推；action=clone 克隆远端为本地 bundle（可注册命名目录）。',
-      '冲突策略：index.md 自动重生成、log.md 取并集 → 永不阻塞；概念/AGENTS.md 冲突会停止同步并报清单（工作区回滚到同步前，绝不丢改动）。',
-      '绝不 force push；凭证交给 git（SSH/credential helper）。详见 wiki_help sync。',
+      '在线知识库同步（多台机器/多人/多个 agent 读写同一份 bundle），按当前 bundle 的后端自动分派：',
+      '· 本地目录 bundle → Git 远端：status 看远端/分支/ahead-behind/脏文件/冲突；sync 提交+拉取合并+推送；init 挂远端并首推；clone 克隆远端。',
+      '· 飞书 bundle（云盘文件夹存原生 .md）→ lark-cli：status 看待推送/待拉取/两侧都改/远端已删；sync 推本地改动+拉远端改动；pull/push 单向；init 新建或挂载云盘文件夹并注册命名 bundle。',
+      '冲突策略（两种后端一致）：index.md 本地重生成、log.md 取并集 → 永不阻塞；概念/AGENTS.md 两侧都改会停止同步并报清单，绝不 force/覆盖；飞书后端永不删除两端文件（删除只报告）。',
+      '凭证与认证：git 交给 git；飞书交给 lark-cli（user 身份）。详见 wiki_help sync / wiki_help feishu。',
     ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'status=只读状态 | sync=同步 | init=初始化远端并首推 | clone=克隆远端', enum: ['status', 'sync', 'init', 'clone'] },
-        message: { type: 'string', description: 'sync 时的提交信息（缺省自动生成）' },
+        action: { type: 'string', description: 'status=只读 | sync=双向同步 | pull=只拉 | push=只推 | init=初始化（git 远端或飞书文件夹） | clone=克隆 git 远端', enum: ['status', 'sync', 'pull', 'push', 'init', 'clone'] },
+        message: { type: 'string', description: 'git sync 时的提交信息（缺省自动生成）' },
         bundle: { type: 'string', description: '目标命名 bundle（缺省=当前生效目录）' },
-        remote: { type: 'string', description: 'init：远端 URL（如 git@host:group/wiki.git 或 https://…）' },
+        remote: { type: 'string', description: 'init（git）：远端 URL' },
+        folder_token: { type: 'string', description: 'init（飞书）：云盘文件夹 URL 或 token' },
+        new_folder: { type: 'string', description: 'init（飞书）：在我的空间新建同名文件夹（与 folder_token 二选一）' },
+        cache_dir: { type: 'string', description: 'init（飞书）：本地缓存目录（缺省 ~/.agents/wiki-cloud/<名字>）' },
+        adopt: { type: 'string', description: '飞书首次同步的裁决：local=以本地为准推送，remote=以远端为准拉取（缺省 local）', enum: ['local', 'remote'] },
         url: { type: 'string', description: 'clone：远端 URL' },
         dir: { type: 'string', description: 'clone：本地目标目录（须不存在或为空）' },
         name: { type: 'string', description: 'init/clone：同时注册为命名 bundle（三形态共享注册表）' },
         use: { type: 'boolean', description: 'init/clone：注册后设为全局默认分支' },
-        branch: { type: 'string', description: 'init：初始分支名（缺省 main）' },
+        branch: { type: 'string', description: 'init（git）：初始分支名（缺省 main）' },
       },
       required: ['action'],
     },
@@ -990,22 +1096,58 @@ export function apply(ctx, config) {
         const c = await loadCore()
         const action = String(args.action || '')
         const agent = exec && exec.agent
+
         if (action === 'clone') {
           if (!args.url || !args.dir) return { text: 'clone 需要 url 与 dir 参数。' }
           const r = await c.gitClone(String(args.url), String(args.dir), { name: args.name, use: args.use === true })
-          if (!r.ok) return { text: formatGitResult(action, r) }
-          invalidateCaches()
-          clearSession(agent)
+          if (r.ok) { invalidateCaches(); clearSession(agent) }
           return { text: formatGitResult(action, r) }
+        }
+
+        // 飞书初始化：新建/挂载云盘文件夹（与 git init 并列的入口）
+        if (action === 'init' && (args.folder_token || args.new_folder)) {
+          const r = await c.feishuInit({ name: args.name, folderToken: args.folder_token, newFolder: args.new_folder, cacheDir: args.cache_dir, use: args.use === true })
+          invalidateCaches()
+          return { text: formatFeishuResult('init', r) }
         }
 
         const active = args.bundle
           ? await c.resolveBundleRoot(effectiveConfig(), { name: String(args.bundle) })
           : await resolveActive(agent)
+        const isFeishu = active.kind === 'feishu'
 
-        if (action === 'status') return { text: formatGitResult(action, await c.gitStatus(active.path)) }
-        if (action === 'sync') {
-          const r = await c.gitSync(active.path, { message: args.message })
+        if (action === 'status') {
+          return { text: isFeishu ? formatFeishuResult('status', await c.feishuStatus(active)) : formatGitResult('status', await c.gitStatus(active.path)) }
+        }
+        if (isFeishu) {
+          if (action === 'pull') {
+            const before = await c.feishuStatus(active)
+            if (!before.ok) return { text: formatFeishuResult('pull', before) }
+            const r = await c.feishuPull(active, { paths: before.pull.map((x) => x.rel) })
+            invalidateCaches()
+            return { text: formatFeishuResult('pull', { ...r, bundle: active, files: before.pull.length }) }
+          }
+          if (action === 'push') {
+            const before = await c.feishuStatus(active)
+            if (!before.ok) return { text: formatFeishuResult('push', before) }
+            if (before.conflict.length) {
+              return { text: formatFeishuResult('push', { ok: false, step: 'conflict', conflicts: before.conflict.map((x) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: '请先人工处理冲突（飞书或本地任选一侧）再重跑。' }) }
+            }
+            const r = await c.feishuPush(active, { paths: before.push.map((x) => x.rel) })
+            invalidateCaches()
+            return { text: formatFeishuResult('push', { ...r, bundle: active }) }
+          }
+          if (action === 'sync') {
+            const r = await c.feishuSync(active, { adopt: args.adopt, message: args.message })
+            invalidateCaches()
+            if (r.ok) clearSession(agent)
+            return { text: formatFeishuResult('sync', { ...r, bundle: active }) }
+          }
+          return { text: `飞书后端不支持 action「${args.action}」：可用 status | sync | pull | push | init。` }
+        }
+
+        if (action === 'sync' || action === 'push' || action === 'pull') {
+          const r = await c.gitSync(active.path, { message: args.message, push: action !== 'pull' })
           invalidateCaches()
           if (r.ok) clearSession(agent)
           return { text: formatGitResult(action, { ...r, bundle: active }) }
@@ -1013,9 +1155,9 @@ export function apply(ctx, config) {
         if (action === 'init') {
           const r = await c.gitInit(active.path, { remote: args.remote, branch: args.branch, name: args.name, use: args.use === true })
           invalidateCaches()
-          return { text: formatGitResult(action, { ...r, bundle: active }) }
+          return { text: formatGitResult('init', { ...r, bundle: active }) }
         }
-        return { text: `未知 action「${args.action}」：可用 status | sync | init | clone。` }
+        return { text: `未知 action「${args.action}」：可用 status | sync | pull | push | init | clone。` }
       } catch (e) { return strErr(e) }
     },
   })

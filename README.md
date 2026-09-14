@@ -18,7 +18,10 @@ An open-source, generic, agent-first knowledge base: **the format layer strictly
 - **Lifecycle** — `stale_after` expiry, `status: deprecated` (concept-level) and directory-level deprecation, auto-maintained `index.md` / `log.md`.
 - **Validation & health** — `wiki_validate` (OKF compliance) and `wiki_lint` (broken links, orphans, stale entries, missing index).
 - **Multiple bundles** — register several wiki directories as named bundles and switch between them (session-level or persisted globally).
-- **Online knowledge base (Git remote sync)** — the bundle stays a local Markdown tree; attach a remote and several machines / people / agents read and write the same one through `wiki_sync` (or `wiki sync`): commit → fetch/merge → push. `index.md` is regenerated, `log.md` is merged as a union (concurrent writes never block); concept conflicts stop the sync and list the files, the working tree returns to its pre-sync state, and force-push is never used.
+- **Online knowledge base (two backends)** — one `wiki_sync` / `wiki sync` entry point, dispatched by the bundle's backend:
+  - **Local directory + Git remote**: commit → fetch/merge → push for multi-machine collaboration; force-push is never used.
+  - **Feishu cloud drive**: the bundle lives in a Feishu Drive folder as a tree of **native `.md` files** (zero OKF format loss), read and written file-by-file through `lark-cli`; humans browse/download in Feishu, agents do the reading and writing.
+  Both backends share one conflict policy: `index.md` is regenerated locally, `log.md` is merged as a union (never blocks), and a concept / `AGENTS.md` changed on both sides **stops the sync with a conflict list** — nothing is auto-overwritten. The Feishu backend **never deletes files on either side** (deletions are only reported).
 - **Graphical configuration (DSH Web GUI)** — an llm-wiki card under Settings → Plugins → Plugin configuration: named directories (add/rename/remove/set default), Git remote status with one-click sync/init/clone, and a health panel (validate/lint counts + rebuild index). Runtime parameters are deployment-level (the profile's `cordis.patch.yml`) and are deliberately not editable from the card.
 
 ## The Wiki Bundle (Directory Structure)
@@ -90,6 +93,24 @@ wiki sync --message "add pricing notes"
 
 Conflict policy: `index.md` is derived and regenerated from the merged tree; `log.md` is append-only and merged as a union per date block; concepts / `AGENTS.md` / `APPEND_SYSTEM_PROMPT.md` are authored content — on conflict the sync stops, reports the paths and restores the pre-sync working tree (local commits kept), so a human can merge and re-run. Credentials stay with git (SSH agent / credential helper): no tokens are stored and force-push is never used. See `wiki help sync`.
 
+### Feishu online knowledge base (Drive folder + native .md)
+
+```bash
+# Replicate an existing local bundle into a Feishu online library (dry-run by default; --apply to execute; copy, never move)
+node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name feishu-kb --new-folder "team wiki" --apply
+
+# Or create a folder in "My Space" and register it
+wiki sync init --new-folder "team wiki" --name feishu-kb --use
+# Attach an existing folder / another machine
+wiki sync init --folder-token https://feishu.cn/drive/folder/fldcnXXXX --name feishu-kb
+
+# Daily
+wiki sync status          # to-push / to-pull / changed-on-both / deleted-remotely
+wiki sync                 # push local changes + pull remote changes (only changed files)
+```
+
+Three-way state lives in the cache's `.wiki-cloud.json` (fileToken, remote `modified_time`, local mtime/size): one-sided changes transfer, two-sided changes stop the sync with a conflict list. A pull that overwrites a local file backs it up under `.backup/<timestamp>/` first. Requires a logged-in `lark-cli` (`lark-cli auth login`); see `wiki help feishu`.
+
 ### Graphical configuration (DSH Web GUI)
 
 Settings → Plugins → Plugin configuration → llm-wiki card (the host renders the intersection of *served settings namespaces* and *registered cards*; the card key is `dsh-wiki`):
@@ -97,7 +118,8 @@ Settings → Plugins → Plugin configuration → llm-wiki card (the host render
 | Section | What it edits | Where it lands |
 |---------|---------------|----------------|
 | Named directories | add / rename / remove / set default | `~/.agents/wiki-registry.json` (shared with CLI/pi; removal only unregisters, never deletes) |
-| Git sync | remote/branch/ahead-behind/conflicts + sync / init / clone | core `git.mjs`, the same implementation as `wiki_sync` |
+| Online sync | backend-aware: Git (remote/branch/ahead-behind) or Feishu (to-push/to-pull/conflicts/folder link) + sync / pull / push / init / clone | core `git.mjs` / `feishu.mjs`, the same implementation as `wiki_sync` |
+| Named directories | add as **local path** or **Feishu cloud drive** (one click to create the folder in Feishu and register it) | `~/.agents/wiki-registry.json` (Feishu entries are objects: kind/folderToken/cacheDir) |
 | Health & index | validate/lint counts and details, rebuild index | core `validateBundle` / `lintBundle` / `refreshIndex` |
 
 (Runtime parameters are not in the card: data dir, injection section name/order, limits and cache TTL are deployment-level and live in the profile's `cordis.patch.yml`.)
@@ -148,6 +170,7 @@ node scripts/smoke-test.mjs              # 36 checks: core tool chain + registry
 node tests/dsh-mock-test.mjs             # 33 checks: DSH plugin (mock host) tools + injection layers + gates + multi-bundle + sync
 node --test tests/dsh-config-test.mjs    # 9 checks: config card host half (settings namespace + /api/dsh-wiki/* routes)
 node --test tests/git-sync.test.mjs      # 8 checks: Git remote sync (sequential writes / concurrent log / index / concept conflicts)
+node --test tests/feishu-backend.test.mjs # 12 checks: Feishu cloud-drive backend (3-way diff, changed-files-only, conflict stop, log union, argv safety)
 node --test tests/dsh-client-bundle-test.mjs   # 5 checks: card bundle contract + jsdom render smoke
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 checks: pi extension (mock pi)
 node --test tests/three-forms.test.mjs   # 5 checks: all three forms read/write the same bundle consistently
