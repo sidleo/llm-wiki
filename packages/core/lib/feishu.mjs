@@ -20,7 +20,7 @@
 import { execFile } from 'node:child_process'
 import { mkdir, readFile, writeFile, readdir, stat, copyFile, rm } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
-import { expandTilde, writeRegistry, resolveBundleRoot, defaultCloudDir, effectiveBundles } from './registry.mjs'
+import { expandTilde, writeRegistry, resolveBundleRoot, defaultCloudDir, normalizeCacheDir, effectiveBundles } from './registry.mjs'
 import { refreshIndex, mergeLogText } from './indexlog.mjs'
 
 /** 云盘同步状态文件（放在 cacheDir，不参与同步）。 */
@@ -609,7 +609,9 @@ export async function feishuInit(p, opts = {}) {
   if (!folderToken) return { ok: false, step: 'args', error: '需要 --folder-token <URL|token> 或 --new-folder <名称>', next: '云盘文件夹 URL 形如 https://feishu.cn/drive/folder/fldcnXXX' }
 
   // cacheDir 一律显式落到注册表（默认 ~/.agents/wiki-cloud/<名字>），便于卡片/CLI 显示与排障
-  const cacheDir = expandTilde(String(p.cacheDir || '')) || defaultCloudDir(name)
+  const cache = normalizeCacheDir(p.cacheDir, name)
+  if (!cache.ok) return { ok: false, step: 'args', error: cache.error, next: '例：--cache-dir ~/Documents/feishu-wiki' }
+  const cacheDir = cache.dir
   await mkdir(cacheDir, { recursive: true }).catch(() => {})
   const spec = { kind: 'feishu', folderToken, cacheDir, ...(p.label ? { label: String(p.label) } : {}) }
   await writeRegistry({ bundles: { [name]: spec }, ...(p.use ? { active: name } : {}) })

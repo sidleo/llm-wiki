@@ -204,6 +204,7 @@ window.__ModuleLoader__.load({
 			const [addPath, setAddPath] = react.default.useState("");
 			const [addKind, setAddKind] = react.default.useState("local");
 			const [addFolder, setAddFolder] = react.default.useState("");
+			const [addCache, setAddCache] = react.default.useState("");
 			const [newFolderName, setNewFolderName] = react.default.useState("");
 			const [viewBundle, setViewBundle] = react.default.useState("");
 			const [syncInfo, setSyncInfo] = react.default.useState(null);
@@ -352,7 +353,12 @@ window.__ModuleLoader__.load({
 				value: addFolder,
 				placeholder: "https://feishu.cn/drive/folder/fldcnXXX",
 				onChange: setAddFolder
-			})), addKind === "local" ? e("button", {
+			})), addKind === "feishu" ? e(Field, {
+				label: "本地缓存目录（可选，留空用默认）",
+				value: addCache,
+				placeholder: `~/.agents/wiki-cloud/${addName || "<名称>"}`,
+				onChange: setAddCache
+			}) : null, addKind === "feishu" ? e("div", { className: "dwHint" }, "同步在本地缓存目录里进行（与本地库同构的一组 .md）。留空 → ~/.agents/wiki-cloud/<名称>；想改已有库的缓存目录：先从注册表移除再用新目录挂载，缓存文件不会被删。") : null, addKind === "local" ? e("button", {
 				className: "dwBtn",
 				disabled: busy || !addName || !addPath,
 				onClick: () => run(async () => {
@@ -373,10 +379,12 @@ window.__ModuleLoader__.load({
 						op: "add",
 						name: addName,
 						kind: "feishu",
-						folderToken: addFolder
+						folderToken: addFolder,
+						cacheDir: addCache
 					});
 					setAddName("");
 					setAddFolder("");
+					setAddCache("");
 					await afterMutation("已挂载飞书文件夹");
 				})
 			}, "＋ 挂载已有文件夹"), e("div", {
@@ -394,11 +402,13 @@ window.__ModuleLoader__.load({
 					const r = await post("/sync", {
 						op: "feishu-init",
 						name: addName,
-						newFolder: newFolderName
+						newFolder: newFolderName,
+						cacheDir: addCache
 					});
 					setNotice(`已在飞书新建文件夹：${r.url || newFolderName}`);
 					setNewFolderName("");
-					await afterMutation("已注册飞书云盘库（首次同步会把本地内容推上去）");
+					setAddCache("");
+					await afterMutation(`已注册飞书云盘库（本地缓存：${r.cacheDir || "默认"}）`);
 				})
 			}, "在飞书新建文件夹并注册"))), e(Section, {
 				title: "在线同步",

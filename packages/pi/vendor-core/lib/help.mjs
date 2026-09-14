@@ -172,6 +172,17 @@ computation（计算文件路径，缺省用正文 # Computation 代码块）、
 - 多机/多人：另一台机器执行 wiki sync init --folder-token <URL> --name 飞书库，
   首次 wiki sync 会把远端内容拉到本地缓存（~/.agents/wiki-cloud/<名字>/）
 
+## 本地缓存目录（可指定）
+
+同步是在**本地缓存目录**里做的（与本地 bundle 同构的一组 .md）：
+
+- 指定：wiki sync init … --cache-dir ~/Documents/feishu-wiki（必须是绝对路径或 ~/…；
+  相对路径会因宿主工作目录不同而各认一份，故直接拒绝）
+- 不指定：默认 ~/.agents/wiki-cloud/<bundle 名>
+- 图形化：设置 → 插件 → 插件配置 → llm-wiki 卡片，飞书库那一栏的「本地缓存目录（可选）」
+- 想换已有库的缓存目录：先从注册表移除（删注册不动磁盘），再用新目录挂载；
+  或直接把新目录指到旧缓存上复用（账本 .wiki-cloud.json 会决定三方状态）
+
 ## 日常
 
 - wiki sync status —— 只读：待推送 / 待拉取 / 两侧都改（冲突）/ 远端已删 / 被忽略的非 .md 资源

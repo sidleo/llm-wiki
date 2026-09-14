@@ -92,6 +92,21 @@ export function defaultCloudDir(name) {
 }
 
 /**
+ * 归一化飞书库的本地缓存目录：展开 `~`；未给则用默认 `~/.agents/wiki-cloud/<名称>`。
+ * 必须是绝对路径——相对路径在不同宿主下会落到不同 cwd，账本/同步会各认一份。
+ * @returns {{ok:boolean, dir:string, fromInput:boolean, error?:string}}
+ */
+export function normalizeCacheDir(input, name) {
+  const raw = String(input || '').trim()
+  if (!raw) return { ok: true, dir: defaultCloudDir(name), fromInput: false }
+  const dir = expandTilde(raw)
+  if (!dir.startsWith('/')) {
+    return { ok: false, dir: '', fromInput: true, error: '本地缓存目录必须是绝对路径（或 ~/… 开头）：相对路径在不同宿主的工作目录下会解析成不同位置' }
+  }
+  return { ok: true, dir, fromInput: true }
+}
+
+/**
  * 归一化 bundle 声明（两种形态共存）：
  * - `"~/notes/wiki"`                        → 本地目录（历史形态，向后兼容）
  * - `{ kind:'feishu', folderToken, cacheDir }` → 飞书云盘后端；本地工作目录 = cacheDir

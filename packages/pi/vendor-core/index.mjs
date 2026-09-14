@@ -62,6 +62,7 @@ export {
   effectiveBundles,
   normalizeBundleSpec,
   defaultCloudDir,
+  normalizeCacheDir,
   fallbackPath,
   resolveBundleRoot,
   listBundles,

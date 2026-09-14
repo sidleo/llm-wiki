@@ -178,6 +178,7 @@ function Card() {
   const [addPath, setAddPath] = React.useState('')
   const [addKind, setAddKind] = React.useState('local') // local | feishu
   const [addFolder, setAddFolder] = React.useState('') // 飞书文件夹 URL 或 token
+  const [addCache, setAddCache] = React.useState('') // 飞书库本地缓存目录（可选）
   const [newFolderName, setNewFolderName] = React.useState('')
   const [viewBundle, setViewBundle] = React.useState('')
   const [syncInfo, setSyncInfo] = React.useState(null)
@@ -313,14 +314,25 @@ function Card() {
             ? e(Field, { label: '目录（绝对路径或 ~/…）', value: addPath, placeholder: '/Users/you/Documents/llm-wiki', onChange: setAddPath })
             : e(Field, { label: '飞书文件夹 URL 或 token', value: addFolder, placeholder: 'https://feishu.cn/drive/folder/fldcnXXX', onChange: setAddFolder }),
         ),
+        addKind === 'feishu'
+          ? e(Field, {
+              label: '本地缓存目录（可选，留空用默认）',
+              value: addCache,
+              placeholder: `~/.agents/wiki-cloud/${addName || '<名称>'}`,
+              onChange: setAddCache,
+            })
+          : null,
+        addKind === 'feishu'
+          ? e('div', { className: 'dwHint' }, '同步在本地缓存目录里进行（与本地库同构的一组 .md）。留空 → ~/.agents/wiki-cloud/<名称>；想改已有库的缓存目录：先从注册表移除再用新目录挂载，缓存文件不会被删。')
+          : null,
         addKind === 'local'
           ? e('button', { className: 'dwBtn', disabled: busy || !addName || !addPath, onClick: () => run(async () => { await post('/bundles', { op: 'add', name: addName, path: addPath }); setAddName(''); setAddPath(''); await afterMutation('已注册本地目录') }) }, '＋ 添加本地目录')
           : e('div', null,
-              e('button', { className: 'dwBtn', disabled: busy || !addName || !addFolder, onClick: () => run(async () => { await post('/bundles', { op: 'add', name: addName, kind: 'feishu', folderToken: addFolder }); setAddName(''); setAddFolder(''); await afterMutation('已挂载飞书文件夹') }) }, '＋ 挂载已有文件夹'),
+              e('button', { className: 'dwBtn', disabled: busy || !addName || !addFolder, onClick: () => run(async () => { await post('/bundles', { op: 'add', name: addName, kind: 'feishu', folderToken: addFolder, cacheDir: addCache }); setAddName(''); setAddFolder(''); setAddCache(''); await afterMutation('已挂载飞书文件夹') }) }, '＋ 挂载已有文件夹'),
               e('div', { className: 'dwGrid', style: { marginTop: 8 } },
                 e(Field, { label: '新建文件夹名称（建在「我的空间」根）', value: newFolderName, placeholder: '永辉知识库', onChange: setNewFolderName }),
               ),
-              e('button', { className: 'dwBtn', disabled: busy || !addName || !newFolderName, onClick: () => run(async () => { const r = await post('/sync', { op: 'feishu-init', name: addName, newFolder: newFolderName }); setNotice(`已在飞书新建文件夹：${r.url || newFolderName}`); setNewFolderName(''); await afterMutation('已注册飞书云盘库（首次同步会把本地内容推上去）') }) }, '在飞书新建文件夹并注册'),
+              e('button', { className: 'dwBtn', disabled: busy || !addName || !newFolderName, onClick: () => run(async () => { const r = await post('/sync', { op: 'feishu-init', name: addName, newFolder: newFolderName, cacheDir: addCache }); setNotice(`已在飞书新建文件夹：${r.url || newFolderName}`); setNewFolderName(''); setAddCache(''); await afterMutation(`已注册飞书云盘库（本地缓存：${r.cacheDir || '默认'}）`) }) }, '在飞书新建文件夹并注册'),
             ),
       ),
 

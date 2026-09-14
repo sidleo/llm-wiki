@@ -1,6 +1,6 @@
 {
   "name": "@sidleo3/pi-wiki",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Pi extension for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle. Reuses @sidleo3/llm-wiki-core (same implementation as the dsh plugin and skill CLI), registering wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules/help/dirs/use/sync tools with named multi-bundle directories (local / Feishu cloud drive).",
   "author": "sidleo",
   "license": "MIT",

@@ -233,6 +233,42 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     assert.match(protectedOne.body.error, /部署配置/)
   })
 
+  test('飞书库可在挂载时指定本地缓存目录（显式绝对路径 / ~ 展开 / 默认 / 拒绝相对路径）', async () => {
+    const token = 'fldcnCACHE1'
+    // 1) 显式绝对路径
+    const explicit = join(tmp, 'my-feishu-cache')
+    let r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '云库A', kind: 'feishu', folderToken: token, cacheDir: explicit } })
+    assert.equal(r.body.ok, true, JSON.stringify(r.body))
+    assert.equal(r.body.path, explicit, '注册后 path 应指向指定缓存目录')
+    let reg = await core.readRegistry()
+    assert.equal(reg.bundles['云库A'].cacheDir, explicit)
+    assert.equal(reg.bundles['云库A'].kind, 'feishu')
+
+    // 2) ~/… 展开为 home 绝对路径
+    r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '云库B', kind: 'feishu', folderToken: token, cacheDir: '~/Documents/feishu-wiki' } })
+    assert.equal(r.body.ok, true, JSON.stringify(r.body))
+    assert.equal(r.body.path, join(process.env.HOME, 'Documents', 'feishu-wiki'))
+    await core.removeBundle('云库B')
+
+    // 3) 留空 → 默认 ~/.agents/wiki-cloud/<名称>
+    r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '云库C', kind: 'feishu', folderToken: token } })
+    assert.equal(r.body.ok, true, JSON.stringify(r.body))
+    assert.equal(r.body.path, core.defaultCloudDir('云库C'))
+    await core.removeBundle('云库C')
+
+    // 4) 相对路径 → 明确拒绝（否则不同宿主 cwd 各认一份）
+    r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '云库D', kind: 'feishu', folderToken: token, cacheDir: 'relative/dir' } })
+    assert.equal(r.body.ok, false)
+    assert.match(r.body.error, /绝对路径/)
+    assert.equal((await core.readRegistry()).bundles['云库D'], undefined, '校验失败不得写注册表')
+
+    // 5) 改名沿用原缓存目录
+    r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'rename', name: '云库A', newName: '云库A2' } })
+    assert.equal(r.body.ok, true, JSON.stringify(r.body))
+    assert.equal(r.body.path, explicit, '改名不应改动缓存目录')
+    await core.removeBundle('云库A2')
+  })
+
   test('GET /health 与 POST /index（体检 + 派生文件重建）', async () => {
     const h = await callRoute(route('/api/dsh-wiki/health'), { url: '/api/dsh-wiki/health?bundle=demo' })
     assert.equal(h.body.ok, true, JSON.stringify(h.body))

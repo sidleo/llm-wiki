@@ -43,7 +43,7 @@ export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
 /** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.4.7'
+const PLUGIN_VERSION = '0.4.8'
 
 /** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
 const SETTINGS_NS = 'dsh-wiki'
@@ -355,8 +355,15 @@ function registerWebRoutes(ctx, deps) {
           const folderToken = c.feishuParseFolderToken(body.folderToken || (prevSpec && prevSpec.decl && prevSpec.decl.folderToken) || '')
           if (!folderToken) return jsonResponse(res, { ok: false, error: '飞书库需要云盘文件夹 URL 或 token（或先用「在飞书新建文件夹」）' }, 400)
           const prevCache = prevSpec && prevSpec.decl ? prevSpec.decl.cacheDir : ''
-          const cacheDir = String(body.cacheDir || '').trim() || (prevCache && prevCache !== c.defaultCloudDir(name) ? prevCache : c.defaultCloudDir(nextName))
-          spec = { kind: 'feishu', folderToken, cacheDir: c.expandTilde(cacheDir) }
+          // 缓存目录：显式传入优先（必须绝对路径，避免不同宿主 cwd 各认一份）；rename 沿用原值；否则默认
+          let cacheDir = prevCache ? c.expandTilde(prevCache) : ''
+          if (String(body.cacheDir || '').trim()) {
+            const cache = c.normalizeCacheDir(body.cacheDir, nextName)
+            if (!cache.ok) return jsonResponse(res, { ok: false, error: cache.error }, 400)
+            cacheDir = cache.dir
+          }
+          if (!cacheDir) cacheDir = c.normalizeCacheDir('', nextName).dir
+          spec = { kind: 'feishu', folderToken, cacheDir }
         } else {
           const path = c.expandTilde(String(body.path || (prevSpec ? prevSpec.path : '')).trim())
           if (!path) return jsonResponse(res, { ok: false, error: '目录路径不能为空' }, 400)
