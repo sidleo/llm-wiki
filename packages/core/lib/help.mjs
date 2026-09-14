@@ -47,7 +47,7 @@ const SECTIONS = {
   agents: doc(
     '如何写 AGENTS.md（目录规则）',
     `
-位置：任意目录（如 bundle 根、或 永辉/sql/）。可多级：对目录 D 生效的是
+位置：任意目录（如 bundle 根、或 业务/sql/）。可多级：对目录 D 生效的是
 D → bundle 根链上「最近」的 AGENTS.md，多条逐级叠加、子覆盖父。
 
 用途：给写工具（wiki_create/update）的确定性门控读 —— 不是给 LLM 看的行为引导。
@@ -68,7 +68,7 @@ D → bundle 根链上「最近」的 AGENTS.md，多条逐级叠加、子覆盖
   append: doc(
     '如何写 APPEND_SYSTEM_PROMPT.md（目录提示词注入）',
     `
-位置：任意目录（如 永辉/sql/APPEND_SYSTEM_PROMPT.md）。正文是什么，就会
+位置：任意目录（如 业务/sql/APPEND_SYSTEM_PROMPT.md）。正文是什么，就会
 原样追加进使用该 bundle 的 agent 的 system prompt。
 
 三形态的落地方式（内容一致，机制不同）：
@@ -166,7 +166,7 @@ computation（计算文件路径，缺省用正文 # Computation 代码块）、
 
 ## 起步
 
-- 新建在线库：wiki sync init --new-folder 永辉知识库 --name 飞书库 [--use]
+- 新建在线库：wiki sync init --new-folder 团队知识库 --name 飞书库 [--use]
   （在“我的空间”根建同名文件夹并注册命名 bundle；私有，仅你可见）
 - 挂已有文件夹：wiki sync init --folder-token https://feishu.cn/drive/folder/fldcnXXXX --name 飞书库
 - 多机/多人：另一台机器执行 wiki sync init --folder-token <URL> --name 飞书库，

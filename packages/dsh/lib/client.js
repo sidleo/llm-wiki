@@ -382,7 +382,7 @@ window.__ModuleLoader__.load({
 			}, "飞书云盘库")), e("div", { className: "dwGrid" }, e(Field, {
 				label: "名称",
 				value: addName,
-				placeholder: addKind === "feishu" ? "如 飞书库" : "如 永辉",
+				placeholder: addKind === "feishu" ? "如 飞书库" : "如 工作",
 				onChange: setAddName
 			}), addKind === "local" ? e(Field, {
 				label: "目录（绝对路径或 ~/…）",
@@ -434,7 +434,7 @@ window.__ModuleLoader__.load({
 			}, e(Field, {
 				label: "新建文件夹名称（建在「我的空间」根）",
 				value: newFolderName,
-				placeholder: "永辉知识库",
+				placeholder: "如 团队知识库",
 				onChange: setNewFolderName
 			})), e("button", {
 				className: "dwBtn",

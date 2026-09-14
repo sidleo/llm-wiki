@@ -88,7 +88,7 @@ wiki sync clone git@host:group/wiki.git ~/Documents/llm-wiki --name 团队库 --
 
 # 日常：先看状态，再同步（提交本地改动 → 拉取合并 → 推送）
 wiki sync status
-wiki sync --message "永辉口径补充"
+wiki sync --message "口径补充"
 ```
 
 冲突策略：`index.md`（派生文件）同步时按目录树重新生成；`log.md`（追加式）按日期块取并集；概念 / `AGENTS.md` / `APPEND_SYSTEM_PROMPT.md` 属人工撰写内容，冲突时同步停止、报冲突清单并把工作区恢复到同步前（本地提交保留），人工解决后重跑即可。凭证交给 git（SSH agent / credential helper），本工具不保存 token，也绝不 force push。详见 `wiki help sync`。
@@ -97,10 +97,10 @@ wiki sync --message "永辉口径补充"
 
 ```bash
 # 把现有本地库复刻成一个飞书在线库（默认 dry-run，--apply 才执行；copy 不 move）
-node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name 飞书库 --new-folder 永辉知识库 --apply
+node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name 飞书库 --new-folder 团队知识库 --apply
 
 # 或者：在「我的空间」新建文件夹并注册
-wiki sync init --new-folder 永辉知识库 --name 飞书库 --use
+wiki sync init --new-folder 团队知识库 --name 飞书库 --use
 # 挂已有文件夹 / 另一台机器
 wiki sync init --folder-token https://feishu.cn/drive/folder/fldcnXXXX --name 飞书库
 

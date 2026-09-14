@@ -596,7 +596,7 @@ export async function feishuSync(spec, opts = {}) {
  */
 export async function feishuInit(p, opts = {}) {
   const name = String(p.name || '').trim()
-  if (!name) return { ok: false, step: 'args', error: '需要 bundle 名（--name）', next: '例：wiki sync init --new-folder 永辉知识库 --name 飞书库' }
+  if (!name) return { ok: false, step: 'args', error: '需要 bundle 名（--name）', next: '例：wiki sync init --new-folder 团队知识库 --name 飞书库' }
   let folderToken = feishuParseFolderToken(p.folderToken)
   let createdFolder = null
   if (!folderToken && p.newFolder) {

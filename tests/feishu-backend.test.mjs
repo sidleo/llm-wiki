@@ -128,12 +128,12 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
   })
 
   test('feishuInit --new-folder：建目录 + 注册对象 spec + 默认 cacheDir 落到 wiki-cloud', async () => {
-    const r = await core.feishuInit({ name: '飞书库', newFolder: '永辉知识库', use: true })
+    const r = await core.feishuInit({ name: '飞书库', newFolder: '团队知识库', use: true })
     assert.equal(r.ok, true, JSON.stringify(r))
-    assert.equal(r.createdFolder.name, '永辉知识库')
+    assert.equal(r.createdFolder.name, '团队知识库')
     assert.match(r.url, /^https:\/\/feishu\.cn\/drive\/folder\//)
     const st = await readState(stateFile)
-    assert.ok(st.dirs['永辉知识库'], '远端应建出文件夹')
+    assert.ok(st.dirs['团队知识库'], '远端应建出文件夹')
     const reg = JSON.parse(await readFile(process.env.WIKI_REGISTRY_FILE, 'utf8'))
     assert.equal(reg.bundles['飞书库'].kind, 'feishu')
     assert.equal(reg.bundles['飞书库'].folderToken, r.folderToken)

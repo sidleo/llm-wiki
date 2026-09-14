@@ -331,7 +331,7 @@ function Card() {
         e(
           'div',
           { className: 'dwGrid' },
-          e(Field, { label: '名称', value: addName, placeholder: addKind === 'feishu' ? '如 飞书库' : '如 永辉', onChange: setAddName }),
+          e(Field, { label: '名称', value: addName, placeholder: addKind === 'feishu' ? '如 飞书库' : '如 工作', onChange: setAddName }),
           addKind === 'local'
             ? e(Field, { label: '目录（绝对路径或 ~/…）', value: addPath, placeholder: '/Users/you/Documents/llm-wiki', onChange: setAddPath })
             : e(Field, { label: '飞书文件夹 URL 或 token', value: addFolder, placeholder: 'https://feishu.cn/drive/folder/fldcnXXX', onChange: setAddFolder }),
@@ -352,7 +352,7 @@ function Card() {
           : e('div', null,
               e('button', { className: 'dwBtn', disabled: busy || !addName || !addFolder, onClick: () => run(async () => { await post('/bundles', { op: 'add', name: addName, kind: 'feishu', folderToken: addFolder, cacheDir: addCache }); setAddName(''); setAddFolder(''); setAddCache(''); await afterMutation('已挂载飞书文件夹') }) }, '＋ 挂载已有文件夹'),
               e('div', { className: 'dwGrid', style: { marginTop: 8 } },
-                e(Field, { label: '新建文件夹名称（建在「我的空间」根）', value: newFolderName, placeholder: '永辉知识库', onChange: setNewFolderName }),
+                e(Field, { label: '新建文件夹名称（建在「我的空间」根）', value: newFolderName, placeholder: '如 团队知识库', onChange: setNewFolderName }),
               ),
               e('button', { className: 'dwBtn', disabled: busy || !addName || !newFolderName, onClick: () => run(async () => { const r = await post('/sync', { op: 'feishu-init', name: addName, newFolder: newFolderName, cacheDir: addCache }); setNotice(`已在飞书新建文件夹：${r.url || newFolderName}`); setNewFolderName(''); setAddCache(''); await afterMutation(`已注册飞书云盘库（本地缓存：${r.cacheDir || '默认'}）`) }) }, '在飞书新建文件夹并注册'),
             ),

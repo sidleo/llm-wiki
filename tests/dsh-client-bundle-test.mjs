@@ -86,10 +86,10 @@ describe('DSH 配置卡片（jsdom 渲染冒烟）', { skip }, () => {
     const state = {
       ok: true,
       settingsNamespace: 'dsh-wiki',
-      active: { name: '永辉', path: '/tmp/wiki' },
+      active: { name: '工作', path: '/tmp/wiki' },
       dataDir: '/tmp/fallback',
       registryPath: '/tmp/wiki-registry.json',
-      entries: [{ name: '永辉', path: '/tmp/wiki', source: 'registry', shadowed: false, active: true, exists: true, isDir: true, isBundle: true }],
+      entries: [{ name: '工作', path: '/tmp/wiki', source: 'registry', shadowed: false, active: true, exists: true, isDir: true, isBundle: true }],
       git: { ok: true, version: 'git version 2' },
     }
     const git = { ok: true, remote: 'origin', branch: 'main', upstream: 'origin/main', ahead: 1, behind: 0, dirty: [' M log.md'], conflicts: [], lastCommit: 'abc1234 2026-01-01 wiki: sync' }
@@ -139,7 +139,7 @@ describe('DSH 配置卡片（jsdom 渲染冒烟）', { skip }, () => {
   test('折叠态先渲染卡片标题与当前默认分支摘要', () => {
     const text = container.textContent
     assert.match(text, /llm-wiki 知识库/)
-    assert.match(text, /默认：永辉/)
+    assert.match(text, /默认：工作/)
   })
 
   test('展开后三个区都渲染，且不再有运行参数区，并读了 /state 与 /git', async () => {

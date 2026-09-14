@@ -12,3 +12,7 @@ package-lock.json
 /AGENTS.md
 /CLAUDE.md
 /CODEBUDDY.md
+
+# 知识库 bundle 产物（代码仓库根目录绝不应出现；防止 git add -A 误收私有内容）
+/log.md
+/index.md

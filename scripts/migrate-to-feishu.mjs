@@ -5,10 +5,10 @@
  * 默认 **dry-run**（只打印计划，不建文件夹、不上传）；确认后加 `--apply`。
  *
  * 用法：
- *   node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name 飞书库 --new-folder 永辉知识库 --apply
+ *   node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name 飞书库 --new-folder 团队知识库 --apply
  *   node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name 飞书库 --folder-token https://feishu.cn/drive/folder/fldcnXXX --apply
  *   # 预演（默认）：
- *   node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name 飞书库 --new-folder 永辉知识库
+ *   node scripts/migrate-to-feishu.mjs --from ~/Documents/llm-wiki --name 飞书库 --new-folder 团队知识库
  *
  * 选项：--cache-dir DIR（缺省 ~/.agents/wiki-cloud/<名字>）--use（注册后设为默认）--skip-index（不重建 index）
  */

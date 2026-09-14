@@ -328,7 +328,7 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     await writeFile(stateFile, JSON.stringify({ files: {}, dirs: {}, nextId: 1 }))
     try {
       const feishuCache = join(tmp, 'feishu-cache')
-      const initR = await callRoute(route('/api/dsh-wiki/sync'), { method: 'POST', body: { op: 'feishu-init', name: '飞书库', newFolder: '永辉知识库', cacheDir: feishuCache, use: false } })
+      const initR = await callRoute(route('/api/dsh-wiki/sync'), { method: 'POST', body: { op: 'feishu-init', name: '飞书库', newFolder: '团队知识库', cacheDir: feishuCache, use: false } })
       assert.equal(initR.body.ok, true, JSON.stringify(initR.body))
       assert.match(initR.body.url, /feishu\.cn\/drive\/folder\//)
 
