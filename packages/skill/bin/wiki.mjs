@@ -50,6 +50,9 @@ async function loadCore() {
   }
 }
 
+/** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
+const CLI_VERSION = '0.4.2'
+
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
   if (i >= 0 && argv[i + 1]) return argv[i + 1]
@@ -270,7 +273,7 @@ async function main() {
         tags: arg(rest, '--tags') ? arg(rest, '--tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined,
         status: arg(rest, '--status'),
         body: bodyFrom(arg(rest, '--body') || ''),
-        opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: '0.2.0' },
+        opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: CLI_VERSION },
       })
       console.log(`created ${out.id}${await onlineFlush(core, dataDir)}`)
       break
@@ -278,7 +281,7 @@ async function main() {
     case 'update': {
       const id = positional(rest).join(' ') || arg(rest, '--id')
       if (!id) { console.error('usage: wiki update ID [--title T] …'); process.exit(1) }
-      const patch = { opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: '0.2.0' } }
+      const patch = { opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: CLI_VERSION } }
       const t = arg(rest, '--title'); if (t !== undefined) patch.title = t
       const d = arg(rest, '--description'); if (d !== undefined) patch.description = d
       const s = arg(rest, '--status'); if (s !== undefined) patch.status = s
@@ -308,7 +311,7 @@ async function main() {
     case 'ingest': {
       const src = positional(rest).join(' ')
       if (!src) { console.error('usage: wiki ingest SOURCE'); process.exit(1) }
-      const out = await core.ingestSource(dataDir, { source: src, refDir: arg(rest, '--ref-dir') }, { producer: 'wiki-cli', version: '0.2.0' })
+      const out = await core.ingestSource(dataDir, { source: src, refDir: arg(rest, '--ref-dir') }, { producer: 'wiki-cli', version: CLI_VERSION })
       console.log(`ingested → ${out.refPath}${out.existed ? ' (existed)' : ''}${await onlineFlush(core, dataDir)}`)
       break
     }

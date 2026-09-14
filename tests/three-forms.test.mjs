@@ -79,7 +79,7 @@ describe("three forms consistency", () => {
     assert.match(v, /compliant|合规/);
     const file = await readFile(join(tmpDir, "tables", "three_probe.md"), "utf8");
     assert.match(file, /type: Table/);
-    assert.match(file, /generated: \{ by: "agent:wiki-cli\/0\.2\.0"/);
+    assert.match(file, /generated: \{ by: "agent:wiki-cli\/\d+\.\d+\.\d+"/);
   });
 
   test("注册表 active 跨 CLI 与 dsh 一致", async () => {

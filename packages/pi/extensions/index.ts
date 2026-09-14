@@ -18,6 +18,9 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** 扩展版本（写入门控的 producer 版本；随 package.json 同步）。 */
+const PI_VERSION = "0.4.2";
+
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;
 function loadCore(): Promise<any> {
@@ -191,7 +194,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
           body: params.body,
           tags: listVal(params.tags),
           status: params.status,
-          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.2.0" },
+          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: PI_VERSION },
         });
         return ok(`已创建 ${created.id}${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
@@ -229,7 +232,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
           type: params.type,
           status: params.status,
           tags: params.tags !== undefined ? listVal(params.tags) : undefined,
-          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.2.0" },
+          opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: PI_VERSION },
         });
         return ok(`已更新 ${params.id}${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
@@ -298,7 +301,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
       try {
         const core = await loadCore();
         const dataDir = await resolveDir();
-        const r = await core.ingestSource(dataDir, { source: params.source, refDir: params.ref_dir }, { producer: "@sidleo3/pi-wiki", version: "0.2.0" });
+        const r = await core.ingestSource(dataDir, { source: params.source, refDir: params.ref_dir }, { producer: "@sidleo3/pi-wiki", version: PI_VERSION });
         return ok(`ingested → ${r.refPath}${r.existed ? " (existed)" : ""}; 来源概念 ${r.sourceConceptId}${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
         return err(e);

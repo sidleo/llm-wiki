@@ -43,7 +43,7 @@ export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
 /** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.3.0'
+const PLUGIN_VERSION = '0.4.2'
 
 /** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
 const SETTINGS_NS = 'dsh-wiki'
