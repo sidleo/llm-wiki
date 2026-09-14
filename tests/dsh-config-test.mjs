@@ -245,9 +245,9 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     assert.equal(reg.bundles['云库A'].kind, 'feishu')
 
     // 2) ~/… 展开为 home 绝对路径
-    r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '云库B', kind: 'feishu', folderToken: token, cacheDir: '~/Documents/feishu-wiki' } })
+    r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '云库B', kind: 'feishu', folderToken: token, cacheDir: '~/.agents/wiki-cloud/wiki-test-cache' } })
     assert.equal(r.body.ok, true, JSON.stringify(r.body))
-    assert.equal(r.body.path, join(process.env.HOME, 'Documents', 'feishu-wiki'))
+    assert.equal(r.body.path, join(process.env.HOME, '.agents', 'wiki-cloud', 'wiki-test-cache'))
     await core.removeBundle('云库B')
 
     // 3) 留空 → 默认 ~/.agents/wiki-cloud/<名称>

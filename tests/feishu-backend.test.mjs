@@ -300,26 +300,35 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
 
 
   test('feishuInit：可选指定本地缓存目录（~ 展开 / 默认 / 拒绝相对路径）', async () => {
-    // 显式 ~/… → 展开成绝对路径并写进注册表
-    const a = await core.feishuInit({ name: '云库相对', folderToken: 'fldcnROOT', cacheDir: '~/Documents/feishu-wiki' })
-    assert.equal(a.ok, true, JSON.stringify(a))
-    assert.equal(a.cacheDir, join(process.env.HOME, 'Documents', 'feishu-wiki'))
-    const reg = await core.readRegistry()
-    assert.equal(reg.bundles['云库相对'].cacheDir, join(process.env.HOME, 'Documents', 'feishu-wiki'))
-    await core.removeBundle('云库相对')
+    // 测试只允许在自己的命名空间下建目录（~/.agents/wiki-cloud/…），并在结束时清掉
+    const tildePath = '~/.agents/wiki-cloud/wiki-test-cache'
+    const tildeAbs = join(process.env.HOME, '.agents', 'wiki-cloud', 'wiki-test-cache')
+    const defaultAbs = core.defaultCloudDir('云库默认')
+    try {
+      // 显式 ~/… → 展开成绝对路径并写进注册表
+      const a = await core.feishuInit({ name: '云库相对', folderToken: 'fldcnROOT', cacheDir: tildePath })
+      assert.equal(a.ok, true, JSON.stringify(a))
+      assert.equal(a.cacheDir, tildeAbs)
+      const reg = await core.readRegistry()
+      assert.equal(reg.bundles['云库相对'].cacheDir, tildeAbs)
+      await core.removeBundle('云库相对')
 
-    // 留空 → 默认 ~/.agents/wiki-cloud/<名称>
-    const b = await core.feishuInit({ name: '云库默认', folderToken: 'fldcnROOT' })
-    assert.equal(b.ok, true, JSON.stringify(b))
-    assert.equal(b.cacheDir, core.defaultCloudDir('云库默认'))
-    await core.removeBundle('云库默认')
+      // 留空 → 默认 ~/.agents/wiki-cloud/<名称>
+      const b = await core.feishuInit({ name: '云库默认', folderToken: 'fldcnROOT' })
+      assert.equal(b.ok, true, JSON.stringify(b))
+      assert.equal(b.cacheDir, defaultAbs)
+      await core.removeBundle('云库默认')
 
-    // 相对路径 → 拒绝（否则不同宿主 cwd 各认一份）
-    const c = await core.feishuInit({ name: '云库坏', folderToken: 'fldcnROOT', cacheDir: 'relative/x' })
-    assert.equal(c.ok, false)
-    assert.equal(c.step, 'args')
-    assert.match(c.error, /绝对路径/)
-    assert.equal((await core.readRegistry()).bundles['云库坏'], undefined)
+      // 相对路径 → 拒绝（否则不同宿主 cwd 各认一份）
+      const c = await core.feishuInit({ name: '云库坏', folderToken: 'fldcnROOT', cacheDir: 'relative/x' })
+      assert.equal(c.ok, false)
+      assert.equal(c.step, 'args')
+      assert.match(c.error, /绝对路径/)
+      assert.equal((await core.readRegistry()).bundles['云库坏'], undefined)
+    } finally {
+      await rm(tildeAbs, { recursive: true, force: true })
+      await rm(defaultAbs, { recursive: true, force: true })
+    }
   })
 
   test('远端已删的文件只报告、不删本地（v1 不做删除同步）', async () => {
