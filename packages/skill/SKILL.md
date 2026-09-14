@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 0.4.9
+version: 0.4.10
 description: >-
   工作知识库（表结构/字段/指标口径/SQL 取数经验/踩坑记录/业务流程），OKF v0.2 markdown
   bundle，用 `wiki` CLI 读写。**以下情况先用本 skill 查库，不要凭记忆或印象回答**：

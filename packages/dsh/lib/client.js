@@ -166,7 +166,7 @@ window.__ModuleLoader__.load({
 				value: newCache,
 				placeholder: b.path,
 				onChange: setNewCache
-			}), e("div", { className: "dwHint" }, "换目录只改注册表：旧缓存原样留在磁盘上（不删），新目录为空时首次同步会把飞书内容拉下来；旧缓存还有待推送/冲突时会拒绝。")) : e("div", { className: "dwRowPath" }, b.path)), renaming ? [e("button", {
+			}), e("div", { className: "dwHint" }, "换目录只改注册表：旧缓存原样留在磁盘上（不删），新目录为空时首次同步会把飞书内容拉下来；旧缓存还有待推送/冲突时会拒绝。若新目录里已有同内容的 .md（例如就是原来的本地库），首次同步会把它们当作「本地改动」重推一遍（字节相同、只是时间戳与飞书记录不同），属正常：推一次即对齐。")) : e("div", { className: "dwRowPath" }, b.path)), renaming ? [e("button", {
 				key: "ok",
 				className: "dwBtn",
 				disabled: props.busy,
