@@ -5,14 +5,14 @@
  * 用法：
  *   wiki list [--dataDir DIR] [--type T] [--status S]
  *   wiki search QUERY [--dataDir DIR] [--type T] [--tag TAG] [--limit N]
- *   wiki get ID [--dataDir DIR]
+ *   wiki get ID [--dataDir DIR]        # 附该概念所在目录的生效规则
  *   wiki create PATH --type TYPE [--title T] [--description D] [--body FILE|TEXT] [--tags a,b] [--confirmed]
  *   wiki update ID [--title T] [--description D] [--body FILE] [--status S] [--confirmed] [--clear-status]
  *   wiki validate [--dataDir DIR]
  *   wiki lint [--dataDir DIR]
  *   wiki ingest SOURCE [--dataDir DIR] [--ref-dir DIR]
  *   wiki deprecate DIR [--dataDir DIR]
- *   wiki rules DIR [--dataDir DIR]
+ *   wiki rules [DIR] [--dataDir DIR]   # 不带 DIR = 载入全部 APPEND 规则（本应被注入的全文）
  *   wiki dirs [--dataDir DIR]
  *   wiki use NAME [--global] [--dataDir DIR]
  *   wiki sync [status|pull|push] [--message M] [--dataDir DIR] [--wiki NAME]
@@ -51,13 +51,33 @@ async function loadCore() {
 }
 
 /** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const CLI_VERSION = '0.4.3'
+const CLI_VERSION = '0.4.4'
 
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
   if (i >= 0 && argv[i + 1]) return argv[i + 1]
   if (process.env.WIKI_DATA_DIR) return process.env.WIKI_DATA_DIR
   return join(homedir(), '.agents', 'wiki')
+}
+
+/**
+ * skill 形态的规则落地方式：宿主不会注入 system prompt，
+ * 于是让规则**随数据到达**——get/create/update 响应末尾附该目录生效规则
+ * （APPEND 行为规则 + AGENTS.md 门控），agent 不必记得先载入。
+ */
+async function rulesAppendix(core, dataDir, dir) {
+  try {
+    const text = await core.formatRuleAppendix(dataDir, String(dir || ''))
+    return text ? `\n\n${text}` : ''
+  } catch {
+    return ''
+  }
+}
+
+/** concept id → 所在目录（bundle 相对）。 */
+function dirOfId(id) {
+  const s = String(id || '')
+  return s.includes('/') ? s.slice(0, s.lastIndexOf('/')) : ''
 }
 
 /** 解析数据目录：--wiki NAME 指定命名 bundle；显式 --dataDir/WIKI_DATA_DIR 为路径覆盖；
@@ -250,6 +270,7 @@ async function main() {
       console.log(`\n--- backlinks (${got.backlinks.length}) ---`)
       for (const b of got.backlinks) console.log(`  ${b.type}: ${b.title}  (${b.id})`)
       console.log(`\n--- body ---\n${got.body.trim()}`)
+      console.log(await rulesAppendix(core, dataDir, dirOfId(got.id)))
       break
     }
     case 'create': {
@@ -276,6 +297,7 @@ async function main() {
         opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: CLI_VERSION },
       })
       console.log(`created ${out.id}${await onlineFlush(core, dataDir)}`)
+      console.log(await rulesAppendix(core, dataDir, dirOfId(out.id)))
       break
     }
     case 'update': {
@@ -292,6 +314,7 @@ async function main() {
       if (blocked) { console.error(blocked); process.exit(2) }
       await core.updateConcept(dataDir, id, patch)
       console.log(`updated ${id}${await onlineFlush(core, dataDir)}`)
+      console.log(await rulesAppendix(core, dataDir, dirOfId(id)))
       break
     }
     case 'validate': {
@@ -324,12 +347,17 @@ async function main() {
       break
     }
     case 'rules': {
-      const dir = positional(rest).join(' ') || ''
-      const rules = await core.resolveRules(dataDir, dir)
-      if (!rules.length) { console.log('(no AGENTS.md rules found)'); break }
-      for (const r of rules) {
-        console.log(`\n===== ${r.path} =====\n${r.content.trimEnd()}\n`)
+      const dir = positional(rest).join(' ')
+      if (!dir) {
+        // 不带目录 = 载入「本应被注入 system prompt」的规则全文（skill 形态没有注入钩子，这是替代入口）
+        const appends = await core.collectInjectPrompts(dataDir)
+        const rules = await core.resolveRules(dataDir, '')
+        const text = core.formatRuleContext({ dir: '', appends, rules }, { title: '【本 bundle 全部规则】（APPEND 为行为规则 = 本应被注入 system prompt 的全文）' })
+        console.log(text || '(no rules: 既无 APPEND_SYSTEM_PROMPT.md 也无 AGENTS.md)')
+        break
       }
+      const text = core.formatRuleContext(await core.ruleContextFor(dataDir, dir))
+      console.log(text || `(no rules for ${dir})`)
       break
     }
     case 'sync': {

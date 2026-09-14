@@ -6,7 +6,8 @@ OKF v0.2 bundle（默认 `~/.agents/wiki`），一套数据三处共享、无重
 
 ## 能力
 
-Pi 会话注入 14 个工具 + prompt 引导：
+Pi 会话注入 14 个工具 + prompt 引导，并用 `before_agent_start` 钩子**每回合现读**各目录
+`APPEND_SYSTEM_PROMPT.md` 追加进本回合 system prompt（改规则立刻生效，不依赖加载期快照）：
 
 | 工具 | 用途 |
 |------|------|
@@ -19,7 +20,7 @@ Pi 会话注入 14 个工具 + prompt 引导：
 | `wiki_lint` | 体检：断链/孤儿/过期/缺 index |
 | `wiki_ingest` | 登记外部源文件进 bundle（copy 不改源） |
 | `wiki_deprecate` | 目录级批量停用（status: deprecated，零删除） |
-| `wiki_rules` | 查看目录生效的 AGENTS.md 规则（向上遍历取最近） |
+| `wiki_rules` | 目录生效规则：APPEND（行为规则）+ AGENTS.md 门控；不带 path = 全部 APPEND 全文 |
 | `wiki_help` | 机制文档自助查（AGENTS/APPEND 写法、frontmatter、门控） |
 | `wiki_dirs` | 查看全部 wiki 目录分支（命名 bundle）与当前激活项 |
 | `wiki_use` | 切换全局默认目录分支（写注册表 active；pi 无会话态） |

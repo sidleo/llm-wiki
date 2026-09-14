@@ -5,21 +5,28 @@
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, cp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, cp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// 捕获工具注册
+// 捕获工具注册 + 事件钩子
 function mockPi() {
   const tools = new Map();
+  const handlers = new Map();
   return {
     tools,
+    handlers,
     api: {
       registerTool(def) {
         tools.set(def.name, def);
+      },
+      on(event, handler) {
+        const list = handlers.get(event) || [];
+        list.push(handler);
+        handlers.set(event, list);
       },
     },
   };
@@ -28,6 +35,7 @@ function mockPi() {
 describe("pi-wiki extension", () => {
   let tmpDir;
   let registered;
+  let handlers;
   let prevRegEnv;
 
   before(async () => {
@@ -41,6 +49,7 @@ describe("pi-wiki extension", () => {
     const extMod = await import(join(__dirname, "..", "extensions", "index.ts"));
     const mocked = mockPi();
     registered = mocked.tools;
+    handlers = mocked.handlers;
     await extMod.default(mocked.api, {});
   });
 
@@ -90,6 +99,28 @@ describe("pi-wiki extension", () => {
     const r = await run("wiki_rules", { path: "references/attesters" });
     assert.match(r.text, /AGENTS\.md/);
     assert.match(r.text, /references\/AGENTS\.md/);
+  });
+
+  test("wiki_rules 不带 path = 载入全部 APPEND 规则", async () => {
+    const r = await run("wiki_rules", {});
+    // demo bundle 无 APPEND 文件 → 至少要有根 AGENTS.md，且提示语点明这是「本 bundle 全部规则」
+    assert.match(r.text, /本 bundle 全部规则|AGENTS\.md/);
+  });
+
+  test("before_agent_start 每回合现读 APPEND 并追加进 systemPrompt", async () => {
+    const list = handlers.get("before_agent_start");
+    assert.ok(list && list.length, "已注册 before_agent_start 钩子");
+    const fire = () => list[0]({ type: "before_agent_start", prompt: "x", systemPrompt: "BASE" }, {});
+    // demo bundle 本来没有 APPEND → 不注入（不改 systemPrompt）
+    assert.equal(await fire(), undefined, "无规则时不应改动 systemPrompt");
+    // 动态新增一份分类规则 → 下一个回合就应带上（无需重启扩展，也不再是加载期快照）
+    await mkdir(join(tmpDir, "metrics"), { recursive: true });
+    await writeFile(join(tmpDir, "metrics", "APPEND_SYSTEM_PROMPT.md"), "# 指标规则\n\n先查 Metric 再算数。\n", "utf8");
+    const r = await fire();
+    assert.ok(r && typeof r.systemPrompt === "string", "有规则时返回替换后的 systemPrompt");
+    assert.match(r.systemPrompt, /^BASE/, "保留原 system prompt");
+    assert.match(r.systemPrompt, /先查 Metric 再算数/, "正文被注入");
+    assert.match(r.systemPrompt, /metrics\/APPEND_SYSTEM_PROMPT\.md/, "标明来源目录");
   });
 
   test("无门控声明时默认自动记录", async () => {

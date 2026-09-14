@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 扩展版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const PI_VERSION = "0.4.3";
+const PI_VERSION = "0.4.4";
 
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;
@@ -37,7 +37,7 @@ const WIKI_GUIDELINES = [
   "llm-wiki 知识库（OKF v0.2）：概念 = frontmatter(type 必填)+正文的 .md 文件，目录自由分层，真实链接交叉引用；index.md/log.md/AGENTS.md 是保留文件。",
   "做知识相关工作第一步先 wiki_list 看全貌（渐进披露），再 wiki_search / wiki_get 按需取明细。",
   "wiki_get 自动附 backlinks（引用它的概念/坑点）。写入前先 wiki_rules <目录> 看 AGENTS.md 门控。",
-  "主动知识记录行为由各分类目录 APPEND_SYSTEM_PROMPT.md 决定：做某分类工作前若该目录（含祖先）有该文件，其正文即追加行为规则，照做。",
+  "各分类目录 APPEND_SYSTEM_PROMPT.md 的正文每回合已注入 system prompt（【知识库自定义规则】段），照做；要复查或看某目录单独规则用 wiki_rules。",
   "frontmatter 只用 OKF 字段，不引入自定义字段；断链 = 未写入知识，lint 归集，不必修。",
   "在线知识库用 wiki_sync：status 看远端/领先落后/冲突，sync 提交+拉取合并+推送（概念冲突会停止并报清单，index.md 自动重生成、log.md 取并集）；绝不 force push。",
 ].join("\n");
@@ -50,8 +50,8 @@ const listVal = (v: unknown): string[] =>
     ? []
     : String(v).split(/\s*,\s*/).filter(Boolean);
 
-function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, injectSnapshot = ""): void {
-  const guidelines = () => (injectSnapshot ? [WIKI_GUIDELINES + injectSnapshot] : [WIKI_GUIDELINES]);
+function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void {
+  const guidelines = () => [WIKI_GUIDELINES];
 
   /** 当前生效 bundle 根（全局默认：注册表 active 或 default；pi 无会话态）。 */
   async function resolveDir(): Promise<string> {
@@ -333,17 +333,24 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
   pi.registerTool({
     name: "wiki_rules",
     label: "Wiki Rules",
-    description: "查看某目录生效的 AGENTS.md 规则（向上遍历取最近、子覆盖父），写入前先看它确认门控。",
-    promptSnippet: "知识库规则：写入前查看目录 AGENTS.md 门控",
+    description:
+      "查看某目录生效的规则：APPEND_SYSTEM_PROMPT.md（行为规则，= 每回合注入 system prompt 的内容）+ AGENTS.md（门控/写入规则，向上遍历取最近、子覆盖父）。不带 path 时返回本 bundle 全部 APPEND 规则 + 根 AGENTS.md。写入前先看它确认门控。",
+    promptSnippet: "知识库规则：目录行为规则（APPEND）+ 写入门控（AGENTS.md）",
     promptGuidelines: guidelines(),
-    parameters: Type.Object({ path: Type.Optional(Type.String({ description: "目录（bundle 相对，空=根）" })) }),
+    parameters: Type.Object({ path: Type.Optional(Type.String({ description: "目录（bundle 相对，空=根；不传则返回全部 APPEND）" })) }),
     async execute(_id, params) {
       try {
         const core = await loadCore();
         const dataDir = await resolveDir();
-        const rules = await core.resolveRules(dataDir, String(params.path || ""));
-        if (!rules.length) return ok("（无 AGENTS.md 规则）");
-        return ok(rules.map((r: any) => `===== ${r.path} =====\n${r.content.trimEnd()}`).join("\n\n"));
+        const dir = String(params.path || "");
+        if (!dir) {
+          const appends = await core.collectInjectPrompts(dataDir);
+          const rules = await core.resolveRules(dataDir, "");
+          const text = core.formatRuleContext({ dir: "", appends, rules }, { title: "【本 bundle 全部规则】（APPEND 为行为规则，= 本应被注入 system prompt 的全文）" });
+          return ok(text || "（无规则：既无 APPEND_SYSTEM_PROMPT.md 也无 AGENTS.md）");
+        }
+        const text = core.formatRuleContext(await core.ruleContextFor(dataDir, dir));
+        return ok(text || `（${dir} 无生效规则）`);
       } catch (e) {
         return err(e);
       }
@@ -563,32 +570,36 @@ function formatGit(action: string, r: any): string {
 }
 
 /**
- * Pi 扩展默认导出：注册 14 个 wiki_* 工具。
+ * Pi 扩展默认导出：注册 14 个 wiki_* 工具 + 每回合注入分类行为规则。
  * 数据目录默认 ~/.agents/wiki，环境变量 PI_WIKI_DATA_DIR 覆盖；多目录用命名
  * bundle（注册表 ~/.agents/wiki-registry.json），wiki_use 切换全局默认。
  *
- * 启动快照：加载时读一次各目录 APPEND_SYSTEM_PROMPT.md，把目录清单与正文
- * 并入 guidelines。做不到 DSH 的每轮更新（pi 无 system-prompt 瀑布钩子），
- * 但保证 agent 在会话启动时见过一次注入规则全文，而不只是「有这机制」一句话。
- * 若启动后 APPEND 文件变化，agent 可用 wiki_rules 按需重读。
+ * 注入：pi 的 before_agent_start 事件带**已组装好的 systemPrompt**，返回
+ * `{systemPrompt}` 即替换本回合该值（多扩展自动链式，见 pi runner），
+ * 所以这里能做到与 DSH 的 system-prompt 瀑布等价，且**每回合现读**
+ * （改了 APPEND_SYSTEM_PROMPT.md 立刻生效，不依赖加载时快照）。
  */
 export default async function (pi: ExtensionAPI, _ctx?: ExtensionContext): Promise<void> {
   const config: Record<string, unknown> = { dataDir: process.env.PI_WIKI_DATA_DIR || undefined };
-  let extra = "";
-  try {
-    const core = await loadCore();
-    const { path: dataDir } = await core.resolveBundleRoot(config, {});
-    const prompts = await core.collectInjectPrompts(dataDir);
-    if (prompts.length) {
-      const parts = prompts.map((p: any) =>
-        p.dir ? `### [${p.dir}]\n${p.content}` : `### (bundle 根规则)\n${p.content}`,
+
+  pi.on("before_agent_start", async (event) => {
+    try {
+      const core = await loadCore();
+      const { path: dataDir } = await core.resolveBundleRoot(config, {});
+      const appends = await core.collectInjectPrompts(dataDir);
+      if (!appends.length) return;
+      const text = core.formatRuleContext(
+        { dir: "", appends, rules: [] },
+        { title: "【知识库自定义规则】各目录 APPEND_SYSTEM_PROMPT.md 正文（每回合现读，改了这个回合就生效）" },
       );
-      extra =
-        "\n【知识库自定义规则快照】以下为各目录 APPEND_SYSTEM_PROMPT.md 在扩展加载时的内容（后续变更用 wiki_rules 按需重读）：\n" +
-        parts.join("\n\n");
+      if (!text) return;
+      const base = typeof event.systemPrompt === "string" ? event.systemPrompt : "";
+      return { systemPrompt: `${base}\n\n${text}` };
+    } catch {
+      // 注入失败不影响本轮（agent 仍可用 wiki_rules 按需取规则）
+      return;
     }
-  } catch {
-    // 读不到不影响工具注册（静默降级）
-  }
-  registerTools(pi, config, extra);
+  });
+
+  registerTools(pi, config);
 }

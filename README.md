@@ -14,7 +14,7 @@ An open-source, generic, agent-first knowledge base: **the format layer strictly
 - **Progressive disclosure** — every session carries injected tool guidance plus the active bundle/category list; `wiki_list` shows the whole tree first, then you search and drill in.
 - **Real cross-links + automatic backlinks** — concepts reference each other with Markdown links; reading a concept automatically surfaces the pitfalls and rules that cite it.
 - **Directory-level rules (`AGENTS.md`)** — per-directory write gates (which concept types need human confirmation) and behavioral conventions, resolved bottom-up with child directories overriding parents.
-- **Per-directory prompt injection (`APPEND_SYSTEM_PROMPT.md`)** — each category can define its own behavior rules. On DSH they ride the runtime-context snapshot (session tail, re-appended only when branch or rules change); on pi they load once per session. They stay out of the system prompt so injection never invalidates the prompt prefix cache.
+- **Per-directory prompt injection (`APPEND_SYSTEM_PROMPT.md`)** — each category defines its own behavior rules; identical content across all three forms and effective immediately after an edit. DSH rides a constant section plus a runtime-context snapshot; the pi extension hooks `before_agent_start` to re-read them **every turn** and append them to that turn's system prompt; the skill/CLI form has no injection hook, so it uses `wiki rules` (no args = load every rule verbatim) plus rules automatically appended to `wiki get/create/update` responses — the rules travel with the data, so nothing depends on the agent remembering to load them. See [SPEC-EXTENSIONS.md](SPEC-EXTENSIONS.md).
 - **Lifecycle** — `stale_after` expiry, `status: deprecated` (concept-level) and directory-level deprecation, auto-maintained `index.md` / `log.md`.
 - **Validation & health** — `wiki_validate` (OKF compliance) and `wiki_lint` (broken links, orphans, stale entries, missing index).
 - **Multiple bundles** — register several wiki directories as named bundles and switch between them (session-level or persisted globally).
@@ -67,9 +67,9 @@ llm-wiki/
 
 | Form | Install | Capability |
 |------|---------|-----------|
-| DSH plugin | `dsh plugin --profile web add @sidleo3/dsh-wiki` | Layered injection (constant section + session snapshot, optional) + `wiki_*` tools |
-| pi extension | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` tools + prompt guidance |
-| skill + CLI | `~/.agents/skills/wiki/` (see `packages/skill/INSTALL.md`) | SKILL.md guidance + `wiki` CLI (any agent harness) |
+| DSH plugin | `dsh plugin --profile web add @sidleo3/dsh-wiki` | Layered injection (constant section + runtime-context snapshot) + `wiki_*` tools |
+| pi extension | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` tools + prompt guidance + per-turn category rules via `before_agent_start` |
+| skill + CLI | `~/.agents/skills/wiki/` (see `packages/skill/INSTALL.md`) | SKILL.md guidance + `wiki` CLI (any agent harness); rules via `wiki rules` and get/create/update responses |
 
 All three forms read and write **the same bundle** with identical behavior — they reuse `packages/core`, no duplicated implementation.
 

@@ -39,7 +39,7 @@ const SECTIONS = {
 | index.md | 人/agent | 按需读 | 目录索引（渐进披露入口；根可带 okf_version） |
 | log.md | 人/agent | 按需读 | 时间线变更历史（ISO-8601 日期标题） |
 | AGENTS.md | core 工具代码 | wiki_create/update 执行时 resolveRules；wiki_rules 调用时 | 目录规则：怎么写、写前是否需确认（「## 门控」节） |
-| APPEND_SYSTEM_PROMPT.md | 正在用库的 agent | 描述层每轮注入 system prompt | 该目录自定义的追加行为引导正文 |
+| APPEND_SYSTEM_PROMPT.md | 正在用库的 agent | 描述层每轮注入 system prompt（pi 每回合注入；skill 用 \`wiki rules\` 载入 + 随 get/create/update 响应附带） | 该目录自定义的追加行为引导正文 |
 
 其余所有 .md 都是概念文档（含 type 必填的 frontmatter）。`,
   ),
@@ -69,7 +69,14 @@ D → bundle 根链上「最近」的 AGENTS.md，多条逐级叠加、子覆盖
     '如何写 APPEND_SYSTEM_PROMPT.md（目录提示词注入）',
     `
 位置：任意目录（如 永辉/sql/APPEND_SYSTEM_PROMPT.md）。正文是什么，就会
-原样追加进使用该 bundle 的 agent 的 system prompt 每轮注入。
+原样追加进使用该 bundle 的 agent 的 system prompt。
+
+三形态的落地方式（内容一致，机制不同）：
+- DSH 插件：system-prompt 瀑布每轮注入（描述层）。
+- pi 扩展：before_agent_start 钩子每回合现读并替换本回合 system prompt。
+- skill/CLI：宿主没有注入钩子 → 用 \`wiki rules\`（不带目录）一次性载入全部
+  APPEND 全文，且 get/create/update 的响应末尾会自动附该目录生效规则
+  （规则随数据到达，agent 不必记得先载入）。
 
 用途：定义该分类的「行为规则」——比如主动记录约定（什么场景自动记、什么场景先确认）、
 先查库再动手的约定、口径红线、表过期探查策略等。插件本身不含任何场景写死的提示词；

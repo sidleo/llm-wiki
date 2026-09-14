@@ -4,7 +4,7 @@ version: 0.2.0
 description: >-
   llm-wiki 通用知识库（OKF v0.2 格式 + llm-wiki 运维范式）。读写同一份
   markdown knowledge bundle（表结构/口径计算/坑点/指标等概念，带 frontmatter
-  type 与真实交叉链接），通过 `wiki` CLI 完成 list/search/get/create/update/
+  type 与真实交叉链接），通过 `wiki` CLI 完成 rules/list/search/get/create/update/
   validate/lint/ingest/deprecate。当用户提到 llm-wiki、OKF、Open Knowledge
   Format、知识库 bundle、agent knowledge、表口径文档、SQL 知识库，或需要
   检索/记录工作环境中的表结构与口径经验时使用。
@@ -40,11 +40,14 @@ metadata:
 
 ## 3. 标准链路（渐进披露）
 
-与 llm-wiki 的 index.md 渐进披露一致——**先看全貌，再按需取明细**：
+与 llm-wiki 的 index.md 渐进披露一致——**先看规则、再看全貌、再按需取明细**：
 
+0. `wiki rules` —— **开工第一步**：载入各分类 `APPEND_SYSTEM_PROMPT.md` 行为规则全文
+   （本 skill 无 system prompt 注入，这一步就是替代入口；`wiki get/create/update` 的响应
+   也会自动附带目标目录的规则，兜住忘记的情况）
 1. `wiki list [--dataDir DIR]` —— 目录树与全部概念（type/title/id）
 2. `wiki search <关键词> [--type T] [--tag TAG]` —— 关键词检索（匹配 frontmatter + 正文）
-3. `wiki get <id 或 title>` —— 读单个概念全文，**自动附 backlinks（谁引用了它 → 相关坑点/概念自然出现）**
+3. `wiki get <id 或 title>` —— 读单个概念全文，**自动附 backlinks（谁引用了它 → 相关坑点/概念自然出现）+ 该目录生效规则**
 4. 需要校验/体检：`wiki validate` / `wiki lint`
 
 ## 4. 命令速查
@@ -60,7 +63,7 @@ metadata:
 | `wiki lint` | 体检：断链/孤儿/过期/缺 index |
 | `wiki ingest SOURCE [--ref-dir DIR]` | 登记外部源文件进 bundle（copy 不改源） |
 | `wiki deprecate DIR` | 目录级批量标 `status: deprecated` |
-| `wiki rules DIR` | 查看该目录生效的 AGENTS.md 规则（含向上遍历结果） |
+| `wiki rules [DIR]` | **载入规则**：不带 DIR = 本 bundle 全部 `APPEND_SYSTEM_PROMPT.md` 正文（= 本应被注入的全文）+ 根 AGENTS.md；带 DIR = 该目录生效的 APPEND 链 + AGENTS.md 门控链 |
 | `wiki index [DIR]` | 重生成目录 index.md（写操作已自动维护，手工修复时用） |
 | `wiki sync [status\|pull\|push]` | 在线同步（按 bundle 后端分派）：Git 远端或飞书云盘库；`status` 只读 |
 | `wiki sync init --remote URL [--name N] [--use]` | 本地 bundle 挂 Git 远端并首推 |
@@ -76,12 +79,17 @@ metadata:
 本 skill 本身不写死任何场景的「主动记录」规则。行为由各分类目录的
 `APPEND_SYSTEM_PROMPT.md`（system prompt 注入文件）决定：
 
+- **本宿主的落地方式**：DSH/pi 形态由插件每轮（pi 每回合）注入 system prompt；
+  **skill 形态没有注入钩子**，所以规则靠两条路到达：
+  1. **开工先跑 `wiki rules`**（不带参数）——一次性载入全部 APPEND 规则全文；
+  2. `wiki get` / `wiki create` / `wiki update` 的**响应末尾自动附带**该目录生效规则
+     （行为规则 + AGENTS.md 门控），所以即使忘了第 1 步，读写时也一定会看到。
 - 做某分类相关工作前，若该目录（或其祖先）有 `APPEND_SYSTEM_PROMPT.md`，
   其正文即该分类的追加行为规则——**照做**（例：sql 目录要求「用了库中
   不存在的表 → 自动建 Table；踩坑 → 直接记 Pitfall；新口径先确认后建 Metric」）。
-- `SKILL.md` 与本 skill 只负责通用流程（list→search→get→create）；具体
-  「什么场景自动记、什么场景先确认」以各目录注入规则为准。
-- 通用兜底（某分类无任何注入规则时）：检索未命中若确属缺失知识 → 可建概念
+- `SKILL.md` 与本 skill 只负责通用流程（rules→list→search→get→create）；具体
+  「什么场景自动记、什么场景先确认」以各目录规则为准。
+- 通用兜底（某分类无任何规则时）：检索未命中若确属缺失知识 → 可建概念
   补录；任务收尾可 `wiki lint` 看断链/缺失清单。
 
 ## 6. 写入规范（门控与 trust）
@@ -102,6 +110,5 @@ metadata:
 
 ## 8. 坑与边界
 
-- skill 无「每轮自动注入」：本 skill 靠你主动按标准链路走（先 list / index 再按需 get），这是平台物理边界。
 - 断链不是错误：`[[未写概念]]` 代表尚未写入的知识，lint 归集提示，不必修。
 - 数据目录若不存在，先 `wiki list` 会报错——此时用 demo bundle 参考或先 `wiki ingest` 建第一个概念。

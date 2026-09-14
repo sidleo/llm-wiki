@@ -28,6 +28,8 @@ async function main() {
   const regTmp = await mkdtemp(join(tmpdir(), 'dsh-wiki-reg-'))
   await cp(join(__dirname, '..', 'examples', 'demo-bundle'), tmp, { recursive: true })
   await cp(join(__dirname, '..', 'examples', 'demo-bundle'), tmp2, { recursive: true })
+  // 分类行为规则（注入内容；DSH 走 system-prompt/contexts 注入，wiki_rules 是显式入口）
+  await writeFile(join(tmp, 'tables', 'APPEND_SYSTEM_PROMPT.md'), '# 表规则\n\n用前先 DESCRIBE 核对线上结构。\n', 'utf8')
   const prevReg = process.env.WIKI_REGISTRY_FILE
   process.env.WIKI_REGISTRY_FILE = join(regTmp, 'reg.json')
 
@@ -76,6 +78,11 @@ async function main() {
 
   const got = await tools.get('wiki_get').execute({ id: 'tables/orders' })
   check('wiki_get 含 backlinks 坑点', got.text.includes('pitfalls/join-inflation'))
+
+  const rulesAll = await tools.get('wiki_rules').execute({})
+  check('wiki_rules 无参 = 全部 APPEND 规则', rulesAll.text.includes('用前先 DESCRIBE') && /本 bundle 全部规则/.test(rulesAll.text), rulesAll.text.slice(0, 160))
+  const rulesDir = await tools.get('wiki_rules').execute({ path: 'tables' })
+  check('wiki_rules <目录> = 该目录生效规则（APPEND + 门控）', rulesDir.text.includes('用前先 DESCRIBE'), rulesDir.text.slice(0, 160))
 
   const val = await tools.get('wiki_validate').execute({})
   check('wiki_validate 合规', val.text.includes('OKF v0.2 合规'))

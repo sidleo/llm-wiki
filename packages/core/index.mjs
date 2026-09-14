@@ -19,7 +19,7 @@ export { scanConceptPaths, readConcept, buildGraph, isReserved, RESERVED, readOk
 export { validateBundle } from './lib/validate.mjs'
 export { lintBundle } from './lib/lint.mjs'
 export { searchGraph, getConcept } from './lib/search.mjs'
-export { findRules, readRules, resolveRules, parseGateDecl, gateForType } from './lib/rules.mjs'
+export { findRules, readRules, resolveRules, readAppends, ruleContextFor, formatRuleContext, formatRuleAppendix, extractGateSection, parseGateDecl, gateForType } from './lib/rules.mjs'
 export { getHelp, HELP_TOPICS } from './lib/help.mjs'
 export { renderIndexBody, writeDirIndex, updateIndex, refreshIndex, mergeLogText, appendLog } from './lib/indexlog.mjs'
 export { createConcept, updateConcept, deprecateDir, nowIso, checkId } from './lib/write.mjs'

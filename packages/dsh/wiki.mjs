@@ -43,7 +43,7 @@ export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
 /** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.4.3'
+const PLUGIN_VERSION = '0.4.4'
 
 /** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
 const SETTINGS_NS = 'dsh-wiki'
@@ -986,19 +986,24 @@ export function apply(ctx, config) {
   // —— wiki_rules ——
   ctx.tools.register({
     name: 'wiki_rules',
-    description: '查看某目录生效的 AGENTS.md 规则（向上遍历取最近、子覆盖父），写入前先看它确认门控。',
+    description: '查看某目录生效的规则：APPEND_SYSTEM_PROMPT.md（行为规则，= 已注入 system prompt 的内容）+ AGENTS.md（门控/写入规则，向上遍历取最近、子覆盖父）。不带 path 时返回本 bundle 全部 APPEND + 根 AGENTS.md。写入前先看它确认门控。',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string', description: '目录（bundle 相对，空=根）' } },
+      properties: { path: { type: 'string', description: '目录（bundle 相对，空=根；不传则返回全部 APPEND）' } },
     },
     output: out,
     async execute(args, exec) {
       try {
         const c = await loadCore()
         const dataDir = (await resolveActive(exec && exec.agent)).path
-        const rules = await c.resolveRules(dataDir, String(args.path || ''))
-        if (!rules.length) return { text: '（无 AGENTS.md 规则）' }
-        return { text: rules.map((r) => `===== ${r.path} =====\n${r.content.trimEnd()}`).join('\n\n').slice(0, effectiveConfig().maxGetChars) }
+        const dir = String(args.path || '')
+        const text = dir
+          ? c.formatRuleContext(await c.ruleContextFor(dataDir, dir))
+          : c.formatRuleContext(
+              { dir: '', appends: await c.collectInjectPrompts(dataDir), rules: await c.resolveRules(dataDir, '') },
+              { title: '【本 bundle 全部规则】（APPEND 为行为规则，= 已注入 system prompt 的全文）' },
+            )
+        return { text: (text || (dir ? `（${dir} 无生效规则）` : '（无规则：既无 APPEND_SYSTEM_PROMPT.md 也无 AGENTS.md）')).slice(0, effectiveConfig().maxGetChars) }
       } catch (e) { return strErr(e) }
     },
   })

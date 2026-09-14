@@ -51,9 +51,18 @@ describe("three forms consistency", () => {
     process.env.PI_WIKI_DATA_DIR = tmpDir;
     const piMod = await import(join(__dirname, "..", "packages", "pi", "extensions", "index.ts"));
     const tools = new Map();
-    await piMod.default({ registerTool: (d) => tools.set(d.name, d) }, {});
+    const handlers = new Map();
+    await piMod.default(
+      {
+        registerTool: (d) => tools.set(d.name, d),
+        on: (evt, fn) => handlers.set(evt, [...(handlers.get(evt) || []), fn]),
+      },
+      {},
+    );
     const got = await tools.get("wiki_get").execute("id", { id: "tables/three_probe" }, undefined, undefined, {});
     assert.match(got.text, /Three Probe/);
+    // pi 形态的规则通道：before_agent_start 钩子已注册（每回合现读 APPEND 注入 systemPrompt）
+    assert.ok(handlers.has("before_agent_start"), "三形态一致性：pi 也必须注册规则注入钩子");
     delete process.env.PI_WIKI_DATA_DIR;
   });
 

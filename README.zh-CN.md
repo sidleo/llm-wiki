@@ -14,7 +14,7 @@
 - **渐进披露**——每轮会话注入工具引导与当前 bundle / 分类清单；先 `wiki_list` 看全貌，再检索、再深入。
 - **真实交叉链接 + 自动 backlinks**——概念用 Markdown 链接互相关联；读取一个概念时自动附带引用它的坑点与规则。
 - **目录级规则（`AGENTS.md`）**——每个目录可定义写入门控（哪些概念类型需 human 确认）与行为约定，向上遍历取最近、子目录覆盖父目录。
-- **目录级提示词注入（`APPEND_SYSTEM_PROMPT.md`）**——每个分类可自定义行为规则。DSH 形态走运行时上下文快照（会话尾部，分支或规则变了才更新一条）；pi 形态加载期读一次。两者都不放进 system prompt，避免注入内容打断前缀缓存。
+- **目录级提示词注入（`APPEND_SYSTEM_PROMPT.md`）**——每个分类可自定义行为规则，三形态规则内容一致、改了即时生效：DSH 形态走「恒定 section + 运行时上下文快照」；pi 形态用 `before_agent_start` 钩子**每回合现读**并追加进本回合 system prompt；skill/CLI 形态宿主没有注入钩子，改用 `wiki rules`（不带参数 = 载入全部规则全文）+ `wiki get/create/update` 响应自动附带目标目录规则（规则随数据到达，不必记得先载入）。详见 [SPEC-EXTENSIONS.md](SPEC-EXTENSIONS.md)。
 - **生命周期**——`stale_after` 过期、`status: deprecated`（概念级）与目录级批量停用、自动维护 `index.md` / `log.md`。
 - **校验与体检**——`wiki_validate`（OKF 合规）与 `wiki_lint`（断链、孤儿页、过期、缺 index）。
 - **多目录（命名 bundle）**——注册多个 wiki 目录为命名分支，可切换（会话级或全局持久）。
@@ -67,9 +67,9 @@ llm-wiki/
 
 | 形态 | 安装 | 能力 |
 |------|------|------|
-| DSH 插件 | `dsh plugin --profile web add @sidleo3/dsh-wiki` | 注入分层（恒定 section + 会话快照，可选优化）+ `wiki_*` 工具 |
-| pi 扩展 | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` 工具 + prompt 引导 |
-| skill + CLI | `~/.agents/skills/wiki/`（见 packages/skill/INSTALL.md） | SKILL.md 引导 + `wiki` CLI（任意 agent 可用） |
+| DSH 插件 | `dsh plugin --profile web add @sidleo3/dsh-wiki` | 注入分层（恒定 section + 运行时上下文快照）+ `wiki_*` 工具 |
+| pi 扩展 | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` 工具 + prompt 引导 + `before_agent_start` 每回合注入分类规则 |
+| skill + CLI | `~/.agents/skills/wiki/`（见 packages/skill/INSTALL.md） | SKILL.md 引导 + `wiki` CLI（任意 agent 可用）；规则靠 `wiki rules` 与 get/create/update 响应附带 |
 
 三形态读写**同一份 bundle**、行为一致——都复用 `packages/core`，无重复实现。
 

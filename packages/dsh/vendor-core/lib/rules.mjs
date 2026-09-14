@@ -62,6 +62,94 @@ export async function resolveRules(root, dir) {
 }
 
 /**
+ * 返回目录 dir 到 bundle 根路径上存在的全部 APPEND_SYSTEM_PROMPT.md，按「根→近」排序。
+ * 与 AGENTS.md 同理逐级叠加（后者优先/追加）。
+ * @returns {Promise<{dir:string, path:string, content:string}[]>} dir='' 为根
+ */
+export async function readAppends(root, dir) {
+  const parts = dir ? dir.split('/') : []
+  const out = []
+  for (let depth = 0; depth <= parts.length; depth++) {
+    const d = parts.slice(0, depth).join('/')
+    const p = join(root, d, 'APPEND_SYSTEM_PROMPT.md')
+    try {
+      const content = (await readFile(p, 'utf8')).trim()
+      if (content) out.push({ dir: d, path: d ? `${d}/APPEND_SYSTEM_PROMPT.md` : 'APPEND_SYSTEM_PROMPT.md', content })
+    } catch {
+      // 不存在，跳过
+    }
+  }
+  return out
+}
+
+/**
+ * 目录生效的「规则上下文」：APPEND_SYSTEM_PROMPT.md（行为规则，= 描述层注入的内容）
+ * + AGENTS.md（门控/写入规则）。三形态共用：DSH 每轮注入、pi 每回合注入、
+ * skill/CLI 靠 `wiki rules` 与工具响应附带（skill 宿主无注入钩子）。
+ * @returns {Promise<{dir:string, appends:{dir:string,path:string,content:string}[], rules:{path:string,content:string}[]}>}
+ */
+export async function ruleContextFor(root, dir = '') {
+  const appends = await readAppends(root, dir)
+  const rules = await readRules(root, dir)
+  return { dir: String(dir || ''), appends, rules }
+}
+
+/**
+ * 把 ruleContextFor 的结果格式化成文本（三形态输出格式一致，便于比对）。
+ * @param {{dir?:string, appends?:object[], rules?:object[]}} ctx
+ * @param {{title?:string}} [opts]
+ * @returns {string} 无任何规则时返回 ''
+ */
+export function formatRuleContext(ctx, opts = {}) {
+  const appends = (ctx && ctx.appends) || []
+  const rules = (ctx && ctx.rules) || []
+  if (!appends.length && !rules.length) return ''
+  const dir = ctx && ctx.dir ? ctx.dir : 'bundle 根'
+  const title = (opts && opts.title) || `【${dir} 生效规则】（根→近，后者优先）`
+  const blocks = []
+  for (const a of appends) blocks.push(`===== ${a.path}（行为规则 = system prompt 注入内容）=====\n${String(a.content).trimEnd()}`)
+  for (const r of rules) blocks.push(`===== ${r.path}（门控/写入规则）=====\n${String(r.content).trimEnd()}`)
+  return `${title}\n\n${blocks.join('\n\n')}`
+}
+
+/**
+ * 抽取某份 AGENTS.md 的「## 门控」节原文（无该节返回 ''）。
+ * @param {string} text
+ * @returns {string}
+ */
+export function extractGateSection(text) {
+  const lines = String(text || '').split('\n')
+  let start = -1
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (/^#{1,3}\s*门控/.test(t)) { start = i; continue }
+    if (start >= 0 && /^#{1,3}\s/.test(t)) return lines.slice(start, i).join('\n').trimEnd()
+  }
+  return start >= 0 ? lines.slice(start).join('\n').trimEnd() : ''
+}
+
+/**
+ * 工具响应附带的**紧凑规则**：APPEND 链（行为规则，根→近）+ 各 AGENTS.md 的「## 门控」节。
+ *
+ * 用途：skill/CLI 形态宿主不会注入 system prompt，于是让规则**随数据到达**——
+ * 挂在 wiki get/create/update 的响应末尾，agent 不必记得先跑 `wiki rules`。
+ * 只带门控节而非整份 AGENTS.md：门控是写入时需要的最小信息，正文其余部分是给人读的约定。
+ * @returns {Promise<string>} 无任何规则时返回 ''
+ */
+export async function formatRuleAppendix(root, dir = '') {
+  const appends = await readAppends(root, dir)
+  const rules = await readRules(root, dir)
+  const parts = []
+  for (const a of appends) parts.push(`===== ${a.path}（行为规则 = system prompt 注入内容）=====\n${a.content.trimEnd()}`)
+  for (const r of rules) {
+    const section = extractGateSection(r.content)
+    if (section) parts.push(`===== ${r.path}（「## 门控」节）=====\n${section}`)
+  }
+  if (!parts.length) return ''
+  return `【${dir || 'bundle 根'} 生效规则】（本形态无 system prompt 注入，规则随响应附带）\n\n${parts.join('\n\n')}`
+}
+
+/**
  * 解析某份 AGENTS.md 正文里的「## 门控」节声明。
  *
  * 约定格式（宽松解析，大小写/全半角不敏感）：
