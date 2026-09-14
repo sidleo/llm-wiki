@@ -1,13 +1,18 @@
 ---
 name: wiki
-version: 0.2.0
+version: 0.4.5
 description: >-
-  llm-wiki 通用知识库（OKF v0.2 格式 + llm-wiki 运维范式）。读写同一份
-  markdown knowledge bundle（表结构/口径计算/坑点/指标等概念，带 frontmatter
-  type 与真实交叉链接），通过 `wiki` CLI 完成 rules/list/search/get/create/update/
-  validate/lint/ingest/deprecate。当用户提到 llm-wiki、OKF、Open Knowledge
-  Format、知识库 bundle、agent knowledge、表口径文档、SQL 知识库，或需要
-  检索/记录工作环境中的表结构与口径经验时使用。
+  工作知识库（表结构/字段/指标口径/SQL 取数经验/踩坑记录/业务流程），OKF v0.2 markdown
+  bundle，用 `wiki` CLI 读写。**以下情况先用本 skill 查库，不要凭记忆或印象回答**：
+  问某张表/某字段/表结构（有哪些列、什么类型、怎么关联、是否分区）；问某个指标怎么算、
+  口径是什么、该从哪张表取（销售额/客流/客单价/有货率/毛利等任何业务指标）；
+  要写或改 SQL 取数；数据对不上、算出来不一致、排查异常；想知道某张表有什么坑、注意事项、
+  历史踩坑；需要沉淀经验（踩坑、业务规则、探查结论、新表结构）；用户提到知识库、经验库、
+  表口径文档、取数经验、SQL 知识库、踩过的坑、llm-wiki、OKF、Open Knowledge Format、
+  knowledge bundle、agent knowledge；要把外部资料收进知识库、体检知识库（断链/过期/索引）、
+  或在多台机器/多人之间同步知识库。不负责：与知识库无关的通用编程问答与闲聊；
+  具体数据本身由数据平台工具（如 yh-bigdata）查询，本 skill 提供的是「口径是什么、
+  怎么取、有哪些坑」这类知识。
 metadata:
   requires:
     bins: ["wiki"]
@@ -21,6 +26,27 @@ metadata:
 
 一个知识库（OKF v0.2 + llm-wiki 范式）的通用访问层。**格式与数据是唯一事实**：任何 agent（本 skill 只是其中之一）都能读写同一 bundle。
 
+> CLI 位置：`wiki`（在 PATH 中时直接用；装法见 `~/.agents/skills/wiki/scripts/install.sh`）。
+> 若宿主报 `command not found`（GUI 应用的 PATH 常不含 /usr/local/bin），
+> 改用绝对路径调用：`node "$HOME/.agents/skills/wiki/scripts/wiki.mjs" <子命令>`。
+
+## 0. 主动使用条款（本 skill 的核心价值）
+
+**先查库、再动手**。以下情况**必须**先查库，不许凭记忆答：
+
+- 涉及**表/字段/表结构**的任何问题 → `wiki search <表名或业务词>`，命中就读 `wiki get <id>` 全文
+- 涉及**指标口径/取数来源**（怎么算、从哪张表取、过滤条件、时间口径）→ 先 `wiki search`；没命中就先实际探查再回答，不臆造口径
+- **写 SQL 之前** → 先读表结构与该分类的**口径红线**；读到的坑点（Pitfall）必须遵守
+- **数据对不上/异常/口径不一致** → 先查同类踩坑记录，再排查、再下结论
+- 用户说「上次那个坑」「按我们库里的口径」→ 先查库
+
+**主动记录**（不必等用户吩咐；细节规则以 `wiki rules` 的输出为准）：
+
+- 用了库里没有的表 → 探查结构后用 `wiki create`（type: Table）补录
+- 踩了坑 / 查出根因 → 记 `Pitfall`；与用户确认过的新口径 → 记 `Metric` 或 `Attested Computation`
+- 规则声明需 human 确认的类型 → 先向用户展示、确认后加 `--confirmed`
+- 收尾可 `wiki lint` 看断链/缺失清单
+
 ## 1. 何时使用本 Skill
 
 以下场景应使用本 skill：
@@ -29,11 +55,13 @@ metadata:
 - 用户提到「知识库」「表口径」「这个表怎么查」「踩过的坑」等，且存在 `~/.agents/wiki`（或 `WIKI_DATA_DIR`）bundle
 - 需要把新的源资料/经验写入知识库（create / ingest）
 - 需要体检知识库（validate / lint）或停用整块知识（deprecate）
-- 需要多机/多人共享同一份知识库（`wiki sync`，Git 远端：index.md 自动重生成、log.md 取并集，概念冲突需人工合并）
+- 需要多机/多人共享同一份知识库（`wiki sync`，Git 远端或飞书云盘库）
 
 ## 2. 前置条件
 
-1. `wiki` CLI 已安装且可用（`metadata.requires.bins: ["wiki"]`）。安装：将 `packages/skill/bin/wiki.mjs` 软链/复制为 PATH 中的 `wiki`。
+1. `wiki` CLI 已安装且可用（`metadata.requires.bins: ["wiki"]`）。安装：`bash ~/.agents/skills/wiki/scripts/install.sh`（软链到 /usr/local/bin）。
+   **若宿主找不到 `wiki`**（GUI 应用的 PATH 常常没有 /usr/local/bin）：用绝对路径
+   `node "$HOME/.agents/skills/wiki/scripts/wiki.mjs" <子命令>`，或让用户把 /usr/local/bin 加进宿主 PATH。
 2. 默认数据目录 `~/.agents/wiki`；其他路径用 `--dataDir DIR` 或 `WIKI_DATA_DIR`。
 3. 多目录：命名 bundle 注册在 `~/.agents/wiki-registry.json`（`{ "bundles": { "名字": "/path" }, "active": "名字" }`）；`wiki dirs` 查看分支、`wiki use NAME [--global]` 切换、命令加 `--wiki NAME` 指定。
 4. 若目录不存在或为空，可用 demo bundle 参考结构：仓库 `examples/demo-bundle/`。
