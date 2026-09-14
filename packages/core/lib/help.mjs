@@ -6,7 +6,7 @@
  * 不依赖猜测。内容随本项目规范版本走（SPEC-EXTENSIONS.md 的执行摘要）。
  */
 
-export const HELP_TOPICS = ['quickstart', 'files', 'agents', 'append', 'frontmatter', 'gate', 'bundle', 'sync', 'feishu']
+export const HELP_TOPICS = ['quickstart', 'files', 'agents', 'append', 'frontmatter', 'gate', 'bundle', 'sync', 'feishu', 'prompt']
 
 function doc(title, body) {
   return `# ${title}\n\n${body.trim()}\n`
@@ -26,7 +26,7 @@ const SECTIONS = {
 5. 写入：wiki_create / wiki_update；停用：wiki_deprecate；查规则：wiki_rules
 6. 多目录：wiki_dirs 查看分支，wiki_use <name> [global: true] 切换
 
-更多主题：wiki help files | agents | append | frontmatter | gate | bundle | sync（Git 远端）| feishu（飞书在线库）`,
+更多主题：wiki help files | agents | append | frontmatter | gate | bundle | sync（Git 远端）| feishu（飞书在线库）| prompt（给宿主配常驻要求）`,
   ),
 
   files: doc(
@@ -234,10 +234,35 @@ bundle 仍是本地 markdown 目录树，远端同步让多台机器 / 多人 / 
 - 远端配置只存在 git 自己（.git/config）；知识库格式层零新增字段。
 - 浏览器浏览直接用托管平台（GitHub/GitLab/Gitea）的 markdown 渲染，不另起服务。`,
   ),
+
+  prompt: doc(
+    '给没有注入能力的宿主配常驻要求（wiki prompt）',
+    `
+背景：三形态里 DSH 插件（system-prompt 瀑布）与 pi 扩展（before_agent_start 钩子）
+都能自己把规则注入 system prompt，agent 无需记得。**skill/CLI 形态的宿主
+（豆包 / WorkBuddy / 其他 GUI agent）没有这种钩子**——宿主只在它认为相关时才加载
+SKILL.md，加载与否、加载后是否真去查库，都不由我们决定。
+
+做法：\`wiki prompt\` 打印一段可直接粘贴的常驻要求，把它写进**宿主自己的**
+「自定义指令 / 系统提示词 / 项目 AGENTS.md」，就等于给宿主补上了每轮注入：
+
+- \`wiki prompt\` —— 带使用说明的输出（虚线以下整段粘贴）
+- \`wiki prompt --raw\` —— 只输出正文（便于脚本/agent 直接写文件）
+- \`wiki prompt --full\` —— 追加在线同步与体检条款
+
+正文覆盖：先查库再回答（不许凭记忆答表结构与口径）、主动记录（新表/坑点/确认过的口径）、
+写入门控（需 human 确认的类型先征得同意再加 --confirmed）、收尾 lint、CLI 绝对路径兜底、
+多库切换。默认库名与路径按当前注册表动态填入。
+
+常见位置：WorkBuddy 设置 → 个性化 → 自定义指令；GUI agent 的系统提示词；
+CLI agent 的项目 AGENTS.md。DSH / pi 不需要（已自动注入同一套内容）。
+
+换宿主时的通用姿势：新宿主里能跑命令的话，直接执行 \`wiki prompt\` 把输出贴进它的指令栏即可。`,
+  ),
 }
 
 /**
- * @param {string} topic quickstart|files|agents|append|frontmatter|gate|bundle|sync（大小写不敏感；缺省 quickstart）
+ * @param {string} topic quickstart|files|agents|append|frontmatter|gate|bundle|sync|feishu|prompt（大小写不敏感；缺省 quickstart）
  */
 export function getHelp(topic) {
   const t = String(topic || 'quickstart').trim().toLowerCase()

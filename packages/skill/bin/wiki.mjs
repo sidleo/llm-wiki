@@ -13,6 +13,7 @@
  *   wiki ingest SOURCE [--dataDir DIR] [--ref-dir DIR]
  *   wiki deprecate DIR [--dataDir DIR]
  *   wiki rules [DIR] [--dataDir DIR]   # 不带 DIR = 载入全部 APPEND 规则（本应被注入的全文）
+ *   wiki prompt [--raw] [--full]      # 生成「宿主常驻要求」文本（贴进宿主的自定义指令/系统提示词）
  *   wiki dirs [--dataDir DIR]
  *   wiki use NAME [--global] [--dataDir DIR]
  *   wiki sync [status|pull|push] [--message M] [--dataDir DIR] [--wiki NAME]
@@ -51,7 +52,7 @@ async function loadCore() {
 }
 
 /** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const CLI_VERSION = '0.4.5'
+const CLI_VERSION = '0.4.6'
 
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
@@ -475,6 +476,25 @@ async function main() {
       }
       break
     }
+    case 'prompt': {
+      // 给「不自带注入能力」的宿主（豆包 / WorkBuddy / 其他 GUI agent）配常驻要求：
+      // 打印可直接粘贴的文本，由用户或 agent 写进宿主的自定义指令 / 系统提示词 / AGENTS.md
+      const full = has(rest, '--full')
+      let name = ''
+      let path = ''
+      try {
+        const r = await core.resolveBundleRoot({ dataDir: dataDirFromArgs(args) }, {})
+        name = r.name
+        path = r.path
+      } catch {
+        // 未注册也照常输出（正文里会提示先跑 wiki dirs）
+      }
+      const text = has(rest, '--raw')
+        ? core.buildAgentPrompt({ name, path, full })
+        : core.buildAgentPromptDoc({ name, path, full })
+      console.log(text)
+      break
+    }
     case 'help': {
       const topic = positional(rest).join(' ') || arg(rest, '--topic')
       console.log(core.getHelp(topic))
@@ -482,11 +502,12 @@ async function main() {
     }
     default:
       console.log(`wiki CLI — llm-wiki core 工具
-用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|index|dirs|use|sync|help> [args] [--dataDir DIR] [--wiki NAME]
+用法: wiki <list|search|get|create|update|validate|lint|ingest|deprecate|rules|prompt|index|dirs|use|sync|help> [args] [--dataDir DIR] [--wiki NAME]
        wiki sync [status|pull|push] [--message M] | wiki sync init --remote URL
        wiki sync init --folder-token URL|TOKEN [--name N] | wiki sync init --new-folder 名称 --name N
        wiki sync clone URL DIR [--name N] [--use]
-主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle|sync|feishu]`)
+       wiki prompt [--raw] [--full]   # 生成「宿主常驻要求」文本（贴进宿主的自定义指令/系统提示词）
+主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle|sync|feishu|prompt]`)
       process.exit(cmd ? 1 : 0)
   }
 }

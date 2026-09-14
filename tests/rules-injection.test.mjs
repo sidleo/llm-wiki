@@ -116,4 +116,29 @@ describe('规则到达通道（core + skill CLI）', () => {
     assert.match(out, /sql\/computations 生效规则/)
     assert.match(out, /SQL 规则/)
   })
+
+  test('CLI `wiki prompt` 生成宿主常驻要求（含当前默认库与关键条款）', () => {
+    const out = cli(['prompt'], bundle)
+    assert.match(out, /自定义指令/, '带粘贴位置说明')
+    assert.match(out, /先查库再回答/, '要求先查库')
+    assert.match(out, /不要凭记忆回答表结构与口径/, '禁止凭记忆')
+    assert.match(out, /wiki rules/, '指明规则载入入口')
+    assert.match(out, /--confirmed/, '写明门控确认方式')
+    assert.match(out, /scripts\/wiki\.mjs/, 'GUI 宿主 PATH 兜底')
+    assert.match(out, /wiki dirs/, '多库提示')
+  })
+
+  test('CLI `wiki prompt --raw` 只输出正文；--full 追加同步条款', () => {
+    const raw = cli(['prompt', '--raw'], bundle)
+    assert.doesNotMatch(raw, /^# 把下面虚线/, '--raw 不带粘贴说明')
+    assert.match(raw, /^【llm-wiki 知识库使用要求】/)
+    assert.doesNotMatch(raw, /在线同步/, '默认紧凑版不含同步条款')
+    assert.match(cli(['prompt', '--raw', '--full'], bundle), /在线同步/)
+  })
+
+  test('CLI `wiki help prompt` 解释该命令的用途', () => {
+    const out = cli(['help', 'prompt'], bundle)
+    assert.match(out, /wiki prompt/)
+    assert.match(out, /before_agent_start|system prompt/)
+  })
 })
