@@ -43,7 +43,7 @@ export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
 /** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.4.8'
+const PLUGIN_VERSION = '0.4.9'
 
 /** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
 const SETTINGS_NS = 'dsh-wiki'
@@ -376,6 +376,50 @@ function registerWebRoutes(ctx, deps) {
         const resolved = await c.resolveBundleRoot(effectiveConfig(), { name: nextName })
         const probe = await probeBundlePath(resolved.path)
         return jsonResponse(res, { ok: true, name: nextName, kind: resolved.kind, path: resolved.path, ...probe })
+      }
+
+      // 已注册的飞书库：改本地缓存目录（不删任何数据，旧缓存原样留在磁盘上）
+      if (op === 'cache-dir') {
+        const name = String(body.name || '').trim()
+        if (!Object.prototype.hasOwnProperty.call(reg.bundles || {}, name)) {
+          return jsonResponse(res, { ok: false, error: `注册表里没有「${name}」` }, 400)
+        }
+        if (isConfigDeclared(name)) return jsonResponse(res, { ok: false, error: `「${name}」由部署配置声明，不能在线修改` }, 400)
+        const prev = c.normalizeBundleSpec(reg.bundles[name], { name })
+        if (!prev || prev.kind !== 'feishu') return jsonResponse(res, { ok: false, error: `「${name}」不是飞书库（本地目录库请先移除注册再用新目录挂载）` }, 400)
+        const next = c.normalizeCacheDir(String(body.cacheDir || '').trim(), name)
+        if (!next.ok) return jsonResponse(res, { ok: false, error: next.error }, 400)
+        const nextDir = next.dir
+        if (nextDir === prev.path) return jsonResponse(res, { ok: true, name, path: nextDir, unchanged: true })
+
+        // 目标目录不能是别的飞书库的缓存（两库共用一份 .wiki-cloud.json 会互相打架）
+        for (const [n, decl] of Object.entries(reg.bundles || {})) {
+          if (n === name) continue
+          const s = c.normalizeBundleSpec(decl, { name: n })
+          if (s && s.kind === 'feishu' && s.path === nextDir) {
+            return jsonResponse(res, { ok: false, error: `缓存目录已被飞书库「${n}」占用：两个库不能共用一个缓存` }, 400)
+          }
+        }
+        // 目标目录里若已有别人的账本（folderToken 不同）→ 拒绝，避免串库
+        const ledgerPath = join(nextDir, c.CLOUD_INDEX_FILE)
+        const ledger = await readFile(ledgerPath, 'utf8').then((t) => JSON.parse(t)).catch(() => null)
+        const token = prev.decl && prev.decl.folderToken
+        if (ledger && ledger.folderToken && token && ledger.folderToken !== token) {
+          return jsonResponse(res, { ok: false, error: `目标目录的账本属于另一个飞书文件夹（${ledger.folderToken}）：先清掉该目录的 .wiki-cloud.json，或换一个目录` }, 400)
+        }
+        // 旧缓存还有未上线/冲突的改动 → 先同步，否则换目录会把它们留在旧缓存
+        const st = await c.feishuStatus(prev)
+        if (st.ok && (st.push.length || st.conflict.length)) {
+          return jsonResponse(res, {
+            ok: false,
+            error: `当前缓存还有 ${st.push.length} 个待推送 / ${st.conflict.length} 个冲突：先「一键同步」或处理冲突再换目录${st.conflict.length ? `（冲突：${st.conflict.map((x) => x.rel).join('、')}）` : ''}`,
+          }, 400)
+        }
+        await c.writeRegistry({ bundles: { [name]: { ...reg.bundles[name], cacheDir: nextDir } } })
+        invalidateCaches()
+        const resolved = await c.resolveBundleRoot(effectiveConfig(), { name })
+        const probe = await probeBundlePath(resolved.path)
+        return jsonResponse(res, { ok: true, name, kind: 'feishu', path: resolved.path, oldPath: prev.path, ...probe })
       }
 
       if (op === 'remove') {

@@ -144,7 +144,10 @@ window.__ModuleLoader__.load({
 			const b = props.bundle;
 			const [renaming, setRenaming] = react.default.useState(false);
 			const [newName, setNewName] = react.default.useState(b.name);
+			const [editingCache, setEditingCache] = react.default.useState(false);
+			const [newCache, setNewCache] = react.default.useState("");
 			const readOnly = b.source === "config";
+			const isFeishu = b.kind === "feishu";
 			const status = !b.exists ? "目录不存在" : !b.isDir ? "不是目录" : !b.isBundle ? "不像 bundle（无 .md）" : "";
 			return e("li", { className: "dwRow" }, e("input", {
 				type: "radio",
@@ -158,7 +161,12 @@ window.__ModuleLoader__.load({
 				value: newName,
 				disabled: props.busy,
 				onChange: (ev) => setNewName(ev.target.value)
-			}) : e("div", { className: "dwRowName" }, b.name, b.active ? e("span", { className: "dwBadge dwBadgeOn" }, "默认") : null, readOnly ? e("span", { className: "dwBadge" }, "profile 配置") : null, status ? e("span", { className: "dwBadge" }, status) : null), e("div", { className: "dwRowPath" }, b.path)), renaming ? [e("button", {
+			}) : e("div", { className: "dwRowName" }, b.name, b.active ? e("span", { className: "dwBadge dwBadgeOn" }, "默认") : null, isFeishu ? e("span", { className: "dwBadge" }, "飞书") : null, readOnly ? e("span", { className: "dwBadge" }, "profile 配置") : null, status ? e("span", { className: "dwBadge" }, status) : null), editingCache ? e("div", null, e(Field, {
+				label: "新的本地缓存目录（绝对路径或 ~/…；留空 = 默认 ~/.agents/wiki-cloud/<名称>）",
+				value: newCache,
+				placeholder: b.path,
+				onChange: setNewCache
+			}), e("div", { className: "dwHint" }, "换目录只改注册表：旧缓存原样留在磁盘上（不删），新目录为空时首次同步会把飞书内容拉下来；旧缓存还有待推送/冲突时会拒绝。")) : e("div", { className: "dwRowPath" }, b.path)), renaming ? [e("button", {
 				key: "ok",
 				className: "dwBtn",
 				disabled: props.busy,
@@ -170,27 +178,52 @@ window.__ModuleLoader__.load({
 					setRenaming(false);
 					setNewName(b.name);
 				}
-			}, "取消")] : [readOnly ? null : e("button", {
-				key: "rename",
-				className: "dwBtn",
+			}, "取消")] : editingCache ? [e("button", {
+				key: "ok",
+				className: "dwBtn dwBtnPrimary",
 				disabled: props.busy,
-				onClick: () => setRenaming(true)
-			}, "改名"), readOnly ? null : props.confirmingRemove === b.name ? [e("button", {
-				key: "yes",
+				onClick: () => props.onSetCache(b.name, newCache)
+			}, "确定改缓存"), e("button", {
+				key: "cancel",
 				className: "dwBtn",
-				disabled: props.busy,
-				onClick: () => props.onRemove(b.name)
-			}, "确认删除"), e("button", {
-				key: "no",
-				className: "dwBtn",
-				onClick: () => props.onCancelRemove()
-			}, "取消")] : e("button", {
-				key: "del",
-				className: "dwBtn",
-				disabled: props.busy,
-				title: "只从注册表摘除，不删除目录数据",
-				onClick: () => props.onAskRemove(b.name)
-			}, "删除")]);
+				onClick: () => {
+					setEditingCache(false);
+					setNewCache("");
+				}
+			}, "取消")] : [
+				readOnly ? null : e("button", {
+					key: "rename",
+					className: "dwBtn",
+					disabled: props.busy,
+					onClick: () => setRenaming(true)
+				}, "改名"),
+				readOnly || !isFeishu ? null : e("button", {
+					key: "cache",
+					className: "dwBtn",
+					disabled: props.busy,
+					title: "修改这个飞书库的本地缓存目录（不动磁盘数据）",
+					onClick: () => {
+						setEditingCache(true);
+						setNewCache("");
+					}
+				}, "缓存目录"),
+				readOnly ? null : props.confirmingRemove === b.name ? [e("button", {
+					key: "yes",
+					className: "dwBtn",
+					disabled: props.busy,
+					onClick: () => props.onRemove(b.name)
+				}, "确认删除"), e("button", {
+					key: "no",
+					className: "dwBtn",
+					onClick: () => props.onCancelRemove()
+				}, "取消")] : e("button", {
+					key: "del",
+					className: "dwBtn",
+					disabled: props.busy,
+					title: "只从注册表摘除，不删除目录数据",
+					onClick: () => props.onAskRemove(b.name)
+				}, "删除")
+			]);
 		}
 		function Card() {
 			const [open, setOpen] = react.default.useState(false);
@@ -326,7 +359,15 @@ window.__ModuleLoader__.load({
 					await afterMutation(`已从注册表移除「${name}」`);
 				}),
 				onAskRemove: (name) => setConfirmingRemove(name),
-				onCancelRemove: () => setConfirmingRemove("")
+				onCancelRemove: () => setConfirmingRemove(""),
+				onSetCache: (name, cacheDir) => run(async () => {
+					const r = await post("/bundles", {
+						op: "cache-dir",
+						name,
+						cacheDir
+					});
+					await afterMutation(r && r.unchanged ? `「${name}」缓存目录未变` : `已把「${name}」的本地缓存目录改为 ${r.path}（旧缓存保留在磁盘上）`);
+				})
 			})) : e("li", { className: "dwHint" }, "尚未注册任何命名目录。")) : e("div", { className: "dwHint" }, "正在读取…"), e("div", {
 				className: "dwCheck",
 				style: { marginBottom: 6 }

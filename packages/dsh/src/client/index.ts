@@ -121,7 +121,10 @@ function BundleRow(props) {
   const b = props.bundle
   const [renaming, setRenaming] = React.useState(false)
   const [newName, setNewName] = React.useState(b.name)
+  const [editingCache, setEditingCache] = React.useState(false)
+  const [newCache, setNewCache] = React.useState('')
   const readOnly = b.source === 'config'
+  const isFeishu = b.kind === 'feishu'
   const status = !b.exists ? '目录不存在' : !b.isDir ? '不是目录' : !b.isBundle ? '不像 bundle（无 .md）' : ''
   return e(
     'li',
@@ -144,25 +147,44 @@ function BundleRow(props) {
             { className: 'dwRowName' },
             b.name,
             b.active ? e('span', { className: 'dwBadge dwBadgeOn' }, '默认') : null,
+            isFeishu ? e('span', { className: 'dwBadge' }, '飞书') : null,
             readOnly ? e('span', { className: 'dwBadge' }, 'profile 配置') : null,
             status ? e('span', { className: 'dwBadge' }, status) : null,
           ),
-      e('div', { className: 'dwRowPath' }, b.path),
+      editingCache
+        ? e(
+            'div',
+            null,
+            e(Field, {
+              label: '新的本地缓存目录（绝对路径或 ~/…；留空 = 默认 ~/.agents/wiki-cloud/<名称>）',
+              value: newCache,
+              placeholder: b.path,
+              onChange: setNewCache,
+            }),
+            e('div', { className: 'dwHint' }, '换目录只改注册表：旧缓存原样留在磁盘上（不删），新目录为空时首次同步会把飞书内容拉下来；旧缓存还有待推送/冲突时会拒绝。'),
+          )
+        : e('div', { className: 'dwRowPath' }, b.path),
     ),
     renaming
       ? [
           e('button', { key: 'ok', className: 'dwBtn', disabled: props.busy, onClick: () => props.onRename(b.name, newName) }, '确定'),
           e('button', { key: 'cancel', className: 'dwBtn', onClick: () => { setRenaming(false); setNewName(b.name) } }, '取消'),
         ]
-      : [
-          readOnly ? null : e('button', { key: 'rename', className: 'dwBtn', disabled: props.busy, onClick: () => setRenaming(true) }, '改名'),
-          readOnly ? null : props.confirmingRemove === b.name
-            ? [
-                e('button', { key: 'yes', className: 'dwBtn', disabled: props.busy, onClick: () => props.onRemove(b.name) }, '确认删除'),
-                e('button', { key: 'no', className: 'dwBtn', onClick: () => props.onCancelRemove() }, '取消'),
-              ]
-            : e('button', { key: 'del', className: 'dwBtn', disabled: props.busy, title: '只从注册表摘除，不删除目录数据', onClick: () => props.onAskRemove(b.name) }, '删除'),
-        ],
+      : editingCache
+        ? [
+            e('button', { key: 'ok', className: 'dwBtn dwBtnPrimary', disabled: props.busy, onClick: () => props.onSetCache(b.name, newCache) }, '确定改缓存'),
+            e('button', { key: 'cancel', className: 'dwBtn', onClick: () => { setEditingCache(false); setNewCache('') } }, '取消'),
+          ]
+        : [
+            readOnly ? null : e('button', { key: 'rename', className: 'dwBtn', disabled: props.busy, onClick: () => setRenaming(true) }, '改名'),
+            readOnly || !isFeishu ? null : e('button', { key: 'cache', className: 'dwBtn', disabled: props.busy, title: '修改这个飞书库的本地缓存目录（不动磁盘数据）', onClick: () => { setEditingCache(true); setNewCache('') } }, '缓存目录'),
+            readOnly ? null : props.confirmingRemove === b.name
+              ? [
+                  e('button', { key: 'yes', className: 'dwBtn', disabled: props.busy, onClick: () => props.onRemove(b.name) }, '确认删除'),
+                  e('button', { key: 'no', className: 'dwBtn', onClick: () => props.onCancelRemove() }, '取消'),
+                ]
+              : e('button', { key: 'del', className: 'dwBtn', disabled: props.busy, title: '只从注册表摘除，不删除目录数据', onClick: () => props.onAskRemove(b.name) }, '删除'),
+          ],
   )
 }
 
@@ -295,7 +317,7 @@ function Card() {
               'ul',
               { style: { listStyle: 'none', margin: 0, padding: 0 } },
               state.entries.length
-                ? state.entries.map((b) => e(BundleRow, { key: b.name, bundle: b, busy, confirmingRemove, onActivate: (name) => run(async () => { await post('/bundles', { op: 'activate', name }); await afterMutation(`已把「${name}」设为默认`) }), onRename: (name, newName) => run(async () => { await post('/bundles', { op: 'rename', name, newName, path: state.entries.find((x) => x.name === name).path }); await afterMutation(`已改名为「${newName}」`) }), onRemove: (name) => run(async () => { await post('/bundles', { op: 'remove', name }); setConfirmingRemove(''); await afterMutation(`已从注册表移除「${name}」`) }), onAskRemove: (name) => setConfirmingRemove(name), onCancelRemove: () => setConfirmingRemove('') }))
+                ? state.entries.map((b) => e(BundleRow, { key: b.name, bundle: b, busy, confirmingRemove, onActivate: (name) => run(async () => { await post('/bundles', { op: 'activate', name }); await afterMutation(`已把「${name}」设为默认`) }), onRename: (name, newName) => run(async () => { await post('/bundles', { op: 'rename', name, newName, path: state.entries.find((x) => x.name === name).path }); await afterMutation(`已改名为「${newName}」`) }), onRemove: (name) => run(async () => { await post('/bundles', { op: 'remove', name }); setConfirmingRemove(''); await afterMutation(`已从注册表移除「${name}」`) }), onAskRemove: (name) => setConfirmingRemove(name), onCancelRemove: () => setConfirmingRemove(''), onSetCache: (name, cacheDir) => run(async () => { const r = await post('/bundles', { op: 'cache-dir', name, cacheDir }); await afterMutation(r && r.unchanged ? `「${name}」缓存目录未变` : `已把「${name}」的本地缓存目录改为 ${r.path}（旧缓存保留在磁盘上）`) }) }))
                 : e('li', { className: 'dwHint' }, '尚未注册任何命名目录。'),
             )
           : e('div', { className: 'dwHint' }, '正在读取…'),

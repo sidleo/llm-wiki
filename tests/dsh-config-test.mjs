@@ -356,6 +356,80 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     }
   })
 
+  test('已注册飞书库：卡片可改本地缓存目录（含四类拒绝）', async () => {
+    const prevBin = process.env.WIKI_LARK_BIN
+    const prevState = process.env.FAKE_LARK_STATE
+    const prevRoot = process.env.FAKE_LARK_ROOT
+    const stateFile = join(tmp, 'lark-state-cache.json')
+    process.env.WIKI_LARK_BIN = join(ROOT, 'tests', 'fixtures', 'fake-lark-cli.mjs')
+    process.env.FAKE_LARK_STATE = stateFile
+    process.env.FAKE_LARK_ROOT = 'fldcnROOT'
+    await writeFile(stateFile, JSON.stringify({ files: {}, dirs: {}, nextId: 1 }))
+    const cacheA = join(tmp, 'cache-a')
+    const cacheB = join(tmp, 'cache-b')
+    try {
+      // 先注册一个飞书库（缓存 A）
+      let r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '改缓存库', kind: 'feishu', folderToken: 'fldcnROOT', cacheDir: cacheA } })
+      assert.equal(r.body.ok, true, JSON.stringify(r.body))
+
+      // 1) 无改动 → 可以换到 A2（~ 展开）
+      const home = join(process.env.HOME, '.agents', 'wiki-cloud', 'wiki-test-cache')
+      r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'cache-dir', name: '改缓存库', cacheDir: '~/.agents/wiki-cloud/wiki-test-cache' } })
+      assert.equal(r.body.ok, true, JSON.stringify(r.body))
+      assert.equal(r.body.path, home, '~ 应展开')
+      assert.equal(r.body.oldPath, cacheA)
+      assert.equal((await core.readRegistry()).bundles['改缓存库'].cacheDir, home, '注册表应指向新缓存')
+      assert.equal(await access(cacheA).then(() => true, () => false), true, '旧缓存必须原样保留')
+
+      // 2) 拒绝相对路径
+      r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'cache-dir', name: '改缓存库', cacheDir: 'relative/x' } })
+      assert.equal(r.body.ok, false)
+      assert.match(r.body.error, /绝对路径/)
+
+      // 3) 拒绝目标目录已被别的飞书库占用
+      await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '占用库', kind: 'feishu', folderToken: 'fldcnROOT', cacheDir: cacheB } })
+      r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'cache-dir', name: '改缓存库', cacheDir: cacheB } })
+      assert.equal(r.body.ok, false)
+      assert.match(r.body.error, /占用/)
+
+      // 4) 拒绝目标目录的账本属于另一个飞书文件夹
+      const foreign = join(tmp, 'cache-foreign')
+      await mkdir(foreign, { recursive: true })
+      await writeFile(join(foreign, '.wiki-cloud.json'), JSON.stringify({ folderToken: 'fldcnOTHER', files: {} }))
+      r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'cache-dir', name: '改缓存库', cacheDir: foreign } })
+      assert.equal(r.body.ok, false)
+      assert.match(r.body.error, /另一个飞书文件夹/)
+
+      // 5) 当前缓存有待推送 → 先同步再换（否则改动留在旧缓存）
+      const cacheC = join(tmp, 'cache-c')
+      await mkdir(join(home), { recursive: true })
+      await writeFile(join(home, 'x.md'), '---\ntype: Reference\ntitle: x\n---\n\n正文\n')
+      r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'cache-dir', name: '改缓存库', cacheDir: cacheC } })
+      assert.equal(r.body.ok, false)
+      assert.match(r.body.error, /待推送|冲突/)
+
+      // 6) 非飞书库 → 明确拒绝
+      const localDir = join(tmp, 'cache-dir-local-bundle')
+      await mkdir(localDir, { recursive: true })
+      r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'add', name: '本地库', path: localDir } })
+      assert.equal(r.body.ok, true, JSON.stringify(r.body))
+      r = await callRoute(route('/api/dsh-wiki/bundles'), { method: 'POST', body: { op: 'cache-dir', name: '本地库', cacheDir: cacheA } })
+      assert.equal(r.body.ok, false)
+      assert.match(r.body.error, /不是飞书库/)
+
+      await core.removeBundle('改缓存库')
+      await core.removeBundle('占用库')
+      await core.removeBundle('本地库')
+      await rm(foreign, { recursive: true, force: true })
+    } finally {
+      for (const [k, v] of [['WIKI_LARK_BIN', prevBin], ['FAKE_LARK_STATE', prevState], ['FAKE_LARK_ROOT', prevRoot]]) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+      await rm(join(process.env.HOME, '.agents', 'wiki-cloud', 'wiki-test-cache'), { recursive: true, force: true })
+    }
+  })
+
   test('settings 服务缺席时：不注册命名空间（卡片不出现），工具与 RPC 照常', async () => {
     const bare = makeCtx({ settingsLive: false })
     plugin.apply(bare.ctx, { dataDir: demo, dataDirs: { demo } })
