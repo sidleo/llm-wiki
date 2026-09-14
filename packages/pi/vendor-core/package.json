@@ -1,6 +1,6 @@
 {
   "name": "@sidleo3/llm-wiki-core-vendor",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "@sidleo3/llm-wiki-core vendored into @sidleo3/pi-wiki (auto-generated; do not edit)",
   "type": "module",
   "main": "index.mjs"

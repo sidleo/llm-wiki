@@ -74,7 +74,8 @@ const [domain, cmd] = argv
 const st = load()
 
 if (domain === 'auth' && cmd === 'status') {
-  // 真实 lark-cli auth status 输出的是裸对象（无 {ok,data} 信封）
+  // 严格镜像真实 CLI：auth status 不接受 --format，且输出裸对象（无 {ok,data} 信封）
+  if (has('--format')) fail('unknown flag "--format" for "lark-cli auth status"', 'validation')
   process.stdout.write(JSON.stringify({ appId: 'cli_fake', brand: 'feishu', defaultAs: 'auto', identities: { user: { status: 'ready', available: true, userName: '测试用户', openId: 'ou_test' }, bot: { status: 'ready', available: true } } }) + '\n')
   process.exit(0)
 }

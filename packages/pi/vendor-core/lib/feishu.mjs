@@ -20,7 +20,7 @@
 import { execFile } from 'node:child_process'
 import { mkdir, readFile, writeFile, readdir, stat, copyFile, rm } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
-import { expandTilde, writeRegistry, resolveBundleRoot, defaultCloudDir } from './registry.mjs'
+import { expandTilde, writeRegistry, resolveBundleRoot, defaultCloudDir, effectiveBundles } from './registry.mjs'
 import { refreshIndex, mergeLogText } from './indexlog.mjs'
 
 /** 云盘同步状态文件（放在 cacheDir，不参与同步）。 */
@@ -150,7 +150,8 @@ async function writeIndex(cacheDir, idx) {
 
 /** lark-cli 是否可用（含 user 身份状态）。 */
 export async function larkAvailable(opts = {}) {
-  const res = await runLark(['auth', 'status', '--format', 'json'], opts)
+  // 注意：lark-cli auth status 不接受 --format（本身就输出 JSON）
+  const res = await runLark(['auth', 'status'], opts)
   if (!res.ok) return { ok: false, error: res.error, next: res.error && /ENOENT|未找到/.test(res.error) ? '安装 lark-cli（@larksuite/cli）。' : undefined }
   const raw = res.json || {}
   const identities = raw.identities || {}
@@ -527,6 +528,54 @@ export function feishuParseFolderToken(input) {
   if (/^[A-Za-z0-9_-]{6,}$/.test(raw) && !raw.includes('/')) return raw
   const m = raw.match(/\/folder\/([A-Za-z0-9_-]+)/) || raw.match(/[?&]folder_token=([A-Za-z0-9_-]+)/) || raw.match(/\/drive\/folder\/([A-Za-z0-9_-]+)/)
   return m ? m[1] : ''
+}
+
+/**
+ * 按本地工作目录反查飞书 bundle（写工具用：判断"这个 root 是不是在线库"）。
+ * @returns {Promise<{name:string, kind:'feishu', path:string, decl:object}|null>}
+ */
+export async function feishuBundleForPath(root, config = {}) {
+  const bundles = await effectiveBundles(config)
+  for (const [name, spec] of Object.entries(bundles)) {
+    if (spec.kind === 'feishu' && spec.path === root) return { name, kind: 'feishu', path: spec.path, decl: spec.decl }
+  }
+  return null
+}
+
+/**
+ * 写前冲突闸门：目标文件若在远端也被改过（三方状态判定为冲突），拒绝写入。
+ * @returns {Promise<{blocked:boolean, conflict?:string[], text?:string}|null>} null = 不是飞书 bundle（无需检查）
+ */
+export async function feishuWriteGuard(root, { paths = [] } = {}, config = {}) {
+  const spec = await feishuBundleForPath(root, config)
+  if (!spec) return null
+  const st = await feishuStatus(spec)
+  if (!st.ok) return { blocked: true, text: `在线库状态不可用：${st.error}${st.next ? `（${st.next}）` : ''}` }
+  const wanted = new Set(paths.map((p) => String(p).replace(/^\/+/, '')))
+  const hit = st.conflict.filter((c) => wanted.size === 0 || wanted.has(c.rel))
+  if (!hit.length) return { blocked: false, pending: st.push.length, pull: st.pull.length }
+  return {
+    blocked: true,
+    conflict: hit.map((c) => c.rel),
+    text: `拒绝对 ${hit.map((c) => c.rel).join('、')} 的写入：这些文件在飞书侧也被改过（两侧都改）。请先 wiki_sync status 看清单，人工在飞书或本地保留一侧后重跑同步，再改。`,
+  }
+}
+
+/**
+ * 写后上线：把该飞书 bundle 的待推送文件推上去（本地目录 bundle 返回 null = 无需动作）。
+ * 推送失败不改变写入结果，但会把原因回报给调用方。
+ */
+export async function feishuFlush(root, config = {}, opts = {}) {
+  const spec = await feishuBundleForPath(root, config)
+  if (!spec) return null
+  const st = await feishuStatus(spec)
+  if (!st.ok) return { ok: false, step: 'status', error: st.error, next: st.next, bundle: spec }
+  if (st.conflict.length) {
+    return { ok: false, step: 'conflict', conflicts: st.conflict.map((c) => c.rel), error: `${st.conflict.length} 个文件两侧都改过（本次改动已在本地缓存，未上线）`, next: '先处理冲突再 wiki_sync。', bundle: spec }
+  }
+  if (!st.push.length) return { ok: true, pushed: [], created: [], bundle: spec, nothingToPush: true }
+  const r = await feishuPush(spec, { ...opts, paths: st.push.map((x) => x.rel) })
+  return { ...r, bundle: spec, files: st.push.map((x) => x.rel) }
 }
 
 /** 云盘文件夹链接（人可在飞书里打开）。 */

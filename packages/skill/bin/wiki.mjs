@@ -104,6 +104,27 @@ function bodyFrom(p) {
   return p
 }
 
+/** 飞书在线库：写后上线（返回追加说明，本地 bundle 为空串）。 */
+async function onlineFlush(core, dir) {
+  try {
+    const r = await core.feishuFlush(dir)
+    if (!r || (r.ok && r.nothingToPush)) return ''
+    return r.ok ? `\n[在线库] 已同步上线：推送 ${(r.pushed || []).length} 个文件` : `\n[在线库] 尚未上线：${r.error}`
+  } catch (e) {
+    return `\n[在线库] 尚未上线：${e && e.message ? e.message : String(e)}`
+  }
+}
+
+/** 飞书在线库：写前冲突闸门（返回引导文本或 null）。 */
+async function onlineGuard(core, dir, paths) {
+  try {
+    const g = await core.feishuWriteGuard(dir, { paths })
+    return g && g.blocked ? g.text : null
+  } catch {
+    return null
+  }
+}
+
 /** 飞书同步结果文本化。 */
 function printFeishu(action, r) {
   if (action === 'status') {
@@ -251,7 +272,7 @@ async function main() {
         body: bodyFrom(arg(rest, '--body') || ''),
         opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: '0.2.0' },
       })
-      console.log(`created ${out.id}`)
+      console.log(`created ${out.id}${await onlineFlush(core, dataDir)}`)
       break
     }
     case 'update': {
@@ -264,8 +285,10 @@ async function main() {
       const tag = arg(rest, '--tags'); if (tag !== undefined) patch.tags = tag.split(',').map((x) => x.trim()).filter(Boolean)
       const type = arg(rest, '--type'); if (type !== undefined) patch.type = type
       const b = arg(rest, '--body'); if (b !== undefined) patch.body = bodyFrom(b)
+      const blocked = await onlineGuard(core, dataDir, [`${id}.md`])
+      if (blocked) { console.error(blocked); process.exit(2) }
       await core.updateConcept(dataDir, id, patch)
-      console.log(`updated ${id}`)
+      console.log(`updated ${id}${await onlineFlush(core, dataDir)}`)
       break
     }
     case 'validate': {
@@ -286,13 +309,15 @@ async function main() {
       const src = positional(rest).join(' ')
       if (!src) { console.error('usage: wiki ingest SOURCE'); process.exit(1) }
       const out = await core.ingestSource(dataDir, { source: src, refDir: arg(rest, '--ref-dir') }, { producer: 'wiki-cli', version: '0.2.0' })
-      console.log(`ingested → ${out.refPath}${out.existed ? ' (existed)' : ''}`)
+      console.log(`ingested → ${out.refPath}${out.existed ? ' (existed)' : ''}${await onlineFlush(core, dataDir)}`)
       break
     }
     case 'deprecate': {
       const dir = positional(rest).join(' ') || ''
+      const blocked = await onlineGuard(core, dataDir, [])
+      if (blocked) { console.error(blocked); process.exit(2) }
       const out = await core.deprecateDir(dataDir, dir)
-      console.log(`deprecated ${out.deprecated}/${out.total} concepts`)
+      console.log(`deprecated ${out.deprecated}/${out.total} concepts${await onlineFlush(core, dataDir)}`)
       break
     }
     case 'rules': {

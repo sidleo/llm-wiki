@@ -193,7 +193,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
           status: params.status,
           opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.2.0" },
         });
-        return ok(`已创建 ${created.id}`);
+        return ok(`已创建 ${created.id}${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
         return err(e);
       }
@@ -231,7 +231,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
           tags: params.tags !== undefined ? listVal(params.tags) : undefined,
           opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: "0.2.0" },
         });
-        return ok(`已更新 ${params.id}`);
+        return ok(`已更新 ${params.id}${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
         return err(e);
       }
@@ -299,7 +299,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
         const core = await loadCore();
         const dataDir = await resolveDir();
         const r = await core.ingestSource(dataDir, { source: params.source, refDir: params.ref_dir }, { producer: "@sidleo3/pi-wiki", version: "0.2.0" });
-        return ok(`ingested → ${r.refPath}${r.existed ? " (existed)" : ""}; 来源概念 ${r.sourceConceptId}`);
+        return ok(`ingested → ${r.refPath}${r.existed ? " (existed)" : ""}; 来源概念 ${r.sourceConceptId}${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
         return err(e);
       }
@@ -319,7 +319,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
         const core = await loadCore();
         const dataDir = await resolveDir();
         const r = await core.deprecateDir(dataDir, String(params.path || ""));
-        return ok(`已停用 ${r.deprecated}/${r.total} 个概念`);
+        return ok(`已停用 ${r.deprecated}/${r.total} 个概念${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
         return err(e);
       }
@@ -482,6 +482,25 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>, inject
       }
     },
   });
+}
+
+/** 飞书在线库：写前闸门（命中冲突则返回引导文本）+ 写后上线（返回要追加的说明）。 */
+async function onlineGuard(core: any, dir: string, paths: string[], config: Record<string, unknown>): Promise<string | null> {
+  try {
+    const g = await core.feishuWriteGuard(dir, { paths }, config);
+    return g && g.blocked ? g.text : null;
+  } catch {
+    return null;
+  }
+}
+async function onlineFlush(core: any, dir: string, config: Record<string, unknown>): Promise<string> {
+  try {
+    const r = await core.feishuFlush(dir, config);
+    if (!r || (r.ok && r.nothingToPush)) return "";
+    return r.ok ? `\n[在线库] 已同步上线：推送 ${(r.pushed || []).length} 个文件` : `\n[在线库] 尚未上线：${r.error}`;
+  } catch (e) {
+    return `\n[在线库] 尚未上线：${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 /** 在线同步结果文本化（git / 飞书两种后端）。 */

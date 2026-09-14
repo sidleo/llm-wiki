@@ -267,6 +267,38 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
     assert.equal(/--on-duplicate-remote/.test(flat), false, '不得覆盖同名冲突策略（保持默认 fail）')
   })
 
+  test('写工具接入：feishuFlush 只对已注册的飞书 bundle 生效；feishuWriteGuard 命中冲突即拦', async () => {
+    await writeLocal('a.md', 'v1\n')
+    await core.writeRegistry({ bundles: { 飞书库: { kind: 'feishu', folderToken: 'fldcnROOT', cacheDir } } })
+
+    // 写后上线：把本地改动推上去
+    assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)
+    await writeLocal('b.md', 'new\n')
+    const flush = await core.feishuFlush(cacheDir)
+    assert.equal(flush.ok, true, JSON.stringify(flush))
+    assert.deepEqual(flush.pushed, ['b.md'])
+    const st = await readState(stateFile)
+    assert.ok(st.files['b.md'], '写后上线应把新文件推到远端')
+
+    // 非飞书目录（未注册）→ null（本地 bundle 无需任何在线动作）
+    const other = join(tmp, 'plain-dir')
+    await mkdir(other, { recursive: true })
+    assert.equal(await core.feishuFlush(other), null)
+    assert.equal(await core.feishuWriteGuard(other, { paths: ['x.md'] }), null)
+
+    // 写前闸门：本地与远端都改 → 拦下
+    await writeLocal('a.md', 'local v2\n')
+    await touchRemote('a.md', { content: 'remote v2\n' })
+    const guard = await core.feishuWriteGuard(cacheDir, { paths: ['a.md'] })
+    assert.equal(guard.blocked, true)
+    assert.deepEqual(guard.conflict, ['a.md'])
+    assert.match(guard.text, /两侧都改/)
+    const okGuard = await core.feishuWriteGuard(cacheDir, { paths: ['b.md'] })
+    assert.equal(okGuard.blocked, false)
+    await core.removeBundle('飞书库')
+  })
+
+
   test('远端已删的文件只报告、不删本地（v1 不做删除同步）', async () => {
     await writeLocal('gone.md', 'keep me\n')
     assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)

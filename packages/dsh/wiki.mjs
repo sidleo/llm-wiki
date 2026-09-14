@@ -659,6 +659,32 @@ export function apply(ctx, config) {
     cachedGlobal = null
   }
 
+  /**
+   * 飞书在线库：写前闸门 + 写后上线（本地目录 bundle 自动 no-op）。
+   * - 闸门：目标文件在远端也改过 → 拒绝写入并给出引导；
+   * - 上线：写成功后把待推送文件推上去；失败只报告，不改变写入结果。
+   */
+  async function onlineGuard(core, dataDir, paths) {
+    try {
+      const g = await core.feishuWriteGuard(dataDir, { paths }, effectiveConfig())
+      if (g && g.blocked) return g.text
+    } catch {
+      // 状态不可用时不阻断写入（稍后同步会报告冲突）
+    }
+    return null
+  }
+  async function onlineFlush(core, dataDir) {
+    try {
+      const r = await core.feishuFlush(dataDir, effectiveConfig())
+      if (!r || (r.ok && r.nothingToPush)) return ''
+      return r.ok
+        ? `\n\n[在线库] 已同步上线：推送 ${(r.pushed || []).length} 个文件（新增 ${(r.created || []).length}）`
+        : `\n\n[在线库] 尚未上线：${r.error}${r.next ? `（${r.next}）` : ''}`
+    } catch (e) {
+      return `\n\n[在线库] 尚未上线：${e && e.message ? e.message : String(e)}`
+    }
+  }
+
   // —— 设置命名空间（可选服务）：只作为「插件配置卡片」的可见性钥匙 ——
   // DSH 的插件配置 Tab 只渲染「宿主已服务命名空间 ∩ 已注册卡片」，卡片 key = 本命名空间。
   // 运行参数不在这里配置（schema 为空）：部署级参数改 profile 的 cordis.patch.yml。
@@ -836,7 +862,7 @@ export function apply(ctx, config) {
             version: PLUGIN_VERSION,
           },
         })
-        return { text: `已创建 ${created.id}` }
+        return { text: `已创建 ${created.id}${await onlineFlush(c, dataDir)}` }
       } catch (e) { return strErr(e) }
     },
   })
@@ -867,8 +893,10 @@ export function apply(ctx, config) {
           tags: args.tags ? args.tags.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
           opts: { confirmed: args.confirmed === true, user: args.user || 'human:unknown', producer: 'dsh-wiki', version: PLUGIN_VERSION },
         }
+        const blocked = await onlineGuard(c, dataDir, [`${args.id}.md`])
+        if (blocked) return { text: blocked }
         await c.updateConcept(dataDir, args.id, patch)
-        return { text: `已更新 ${args.id}` }
+        return { text: `已更新 ${args.id}${await onlineFlush(c, dataDir)}` }
       } catch (e) { return strErr(e) }
     },
   })
@@ -928,7 +956,7 @@ export function apply(ctx, config) {
         const c = await loadCore()
         const dataDir = (await resolveActive(exec && exec.agent)).path
         const r = await c.ingestSource(dataDir, { source: args.source, refDir: args.ref_dir }, { producer: 'dsh-wiki', version: PLUGIN_VERSION })
-        return { text: `ingested → ${r.refPath}${r.existed ? ' (existed)' : ''}; 来源概念 ${r.sourceConceptId}` }
+        return { text: `ingested → ${r.refPath}${r.existed ? ' (existed)' : ''}; 来源概念 ${r.sourceConceptId}${await onlineFlush(c, dataDir)}` }
       } catch (e) { return strErr(e) }
     },
   })
@@ -946,8 +974,11 @@ export function apply(ctx, config) {
       try {
         const c = await loadCore()
         const dataDir = (await resolveActive(exec && exec.agent)).path
-        const r = await c.deprecateDir(dataDir, String(args.path || ''))
-        return { text: `已停用 ${r.deprecated}/${r.total} 个概念` }
+        const dir = String(args.path || '').replace(/^\/+|\/+$/g, '')
+        const blocked = await onlineGuard(c, dataDir, [])
+        if (blocked) return { text: blocked }
+        const r = await c.deprecateDir(dataDir, dir)
+        return { text: `已停用 ${r.deprecated}/${r.total} 个概念${await onlineFlush(c, dataDir)}` }
       } catch (e) { return strErr(e) }
     },
   })
