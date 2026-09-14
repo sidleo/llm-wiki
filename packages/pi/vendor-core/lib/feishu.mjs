@@ -32,6 +32,25 @@ const DEFAULT_TIMEOUT_MS = 120000
 export const FEISHU_FULL_TIMEOUT_MS = 600000
 /** 不参与同步的本地路径（前缀匹配）。 */
 const SKIP_PREFIXES = ['.git', '.obsidian', BACKUP_DIR, CLOUD_INDEX_FILE, '.DS_Store']
+/** lark-cli 并发上限：每条命令一个子进程，飞书 Drive API 限流远高于此（列表/拉取/推送都用它）。 */
+const LARK_CONCURRENCY = 6
+
+/** 有并发上限的 map（结果顺序与入参一致）。 */
+async function mapLimit(items, limit, worker) {
+  const list = [...items]
+  const out = new Array(list.length)
+  let next = 0
+  const runners = Array.from({ length: Math.max(1, Math.min(limit, list.length)) }, async () => {
+    for (let i = next++; i < list.length; i = next++) out[i] = await worker(list[i], i)
+  })
+  await Promise.all(runners)
+  return out
+}
+
+/** 路径排序（保证并发遍历后的输出稳定、可比对）。 */
+function byPath(a, b) {
+  return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
+}
 
 function larkBin(opts = {}) {
   return opts.larkBin || process.env.WIKI_LARK_BIN || 'lark-cli'
@@ -180,7 +199,8 @@ export async function feishuListRemote(spec, opts = {}) {
   const ignored = []
   const timeoutMs = opts.timeoutMs || FEISHU_FULL_TIMEOUT_MS
 
-  async function walk(folderToken, prefix) {
+  async function listFolder(folderToken) {
+    const entries = []
     let pageToken = ''
     do {
       const params = { folder_token: folderToken, page_size: 200 }
@@ -188,26 +208,41 @@ export async function feishuListRemote(spec, opts = {}) {
       const r = unwrap(await runLark(['drive', 'files', 'list', '--params', JSON.stringify(params), '--format', 'json', '--as', 'user'], { ...opts, timeoutMs }))
       if (!r.ok) return r
       const data = r.data || {}
-      for (const f of data.files || []) {
-        const rel = prefix ? `${prefix}/${f.name}` : f.name
-        if (f.type === 'folder') {
-          dirs.set(rel, f.token)
-          const sub = await walk(f.token, rel)
-          if (!sub.ok) return sub
-        } else if (f.type === 'file' && String(f.name || '').endsWith('.md')) {
-          files.set(rel, { fileToken: f.token, modifiedTime: Number(f.modified_time || 0), url: f.url })
-        } else {
-          ignored.push(`${rel}（${f.type}）`)
-        }
-      }
+      entries.push(...(data.files || []))
       pageToken = data.has_more ? data.next_page_token || '' : ''
     } while (pageToken)
+    return { ok: true, entries }
+  }
+
+  // 每层内部并发（并发度 6）：19 个目录 ≈ 3 轮，实测 19s → 3s。
+  async function walk(folderToken, prefix) {
+    const listed = await listFolder(folderToken)
+    if (!listed.ok) return listed
+    const subs = []
+    for (const f of listed.entries) {
+      const rel = prefix ? `${prefix}/${f.name}` : f.name
+      if (f.type === 'folder') {
+        dirs.set(rel, f.token)
+        subs.push([rel, f.token])
+      } else if (f.type === 'file' && String(f.name || '').endsWith('.md')) {
+        files.set(rel, { fileToken: f.token, modifiedTime: Number(f.modified_time || 0), url: f.url })
+      } else {
+        ignored.push(`${rel}（${f.type}）`)
+      }
+    }
+    const results = await mapLimit(subs, LARK_CONCURRENCY, ([rel, token]) => walk(token, rel))
+    for (const r of results) if (!r.ok) return r
     return { ok: true }
   }
 
   const walked = await walk(s.folderToken, '')
   if (!walked.ok) return walked
-  return { ok: true, files, dirs, ignored }
+  return {
+    ok: true,
+    files: new Map([...files].sort(byPath)),
+    dirs: new Map([...dirs].sort(byPath)),
+    ignored: ignored.sort(),
+  }
 }
 
 /**
@@ -294,12 +329,9 @@ export async function feishuPull(spec, opts = {}) {
   const pulled = []
   const failed = []
   const backups = []
-  for (const rel of rels) {
+  const results = await mapLimit(rels, LARK_CONCURRENCY, async (rel) => {
     const rf = remote.files.get(rel)
-    if (!rf) {
-      failed.push({ rel, error: '远端不存在该文件' })
-      continue
-    }
+    if (!rf) return { rel, error: '远端不存在该文件' }
     await mkdir(dirname(join(s.cacheDir, rel)), { recursive: true })
     const backup = await backupIfExists(s.cacheDir, rel)
     const r = unwrap(
@@ -307,11 +339,15 @@ export async function feishuPull(spec, opts = {}) {
     )
     if (!r.ok) {
       if (backup) await copyFile(join(s.cacheDir, backup), join(s.cacheDir, rel)).catch(() => {})
-      failed.push({ rel, error: r.error })
-      continue
+      return { rel, error: r.error }
     }
-    pulled.push(rel)
-    if (backup) backups.push(backup)
+    return { rel, ok: true, backup }
+  })
+  for (const r of results) {
+    if (r.ok) {
+      pulled.push(r.rel)
+      if (r.backup) backups.push(r.backup)
+    } else failed.push({ rel: r.rel, error: r.error })
   }
   return { ok: failed.length === 0, pulled, failed, backups }
 }
@@ -358,11 +394,8 @@ export async function feishuPush(spec, opts = {}) {
   const failed = []
   const idx = await readIndex(s.cacheDir)
   idx.folderToken = s.folderToken
-  for (const rel of rels) {
-    if (!local.has(rel)) {
-      failed.push({ rel, error: '本地不存在该文件' })
-      continue
-    }
+  const results = await mapLimit(rels, LARK_CONCURRENCY, async (rel) => {
+    if (!local.has(rel)) return { rel, error: '本地不存在该文件' }
     const rf = remote.files.get(rel)
     const parentRel = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
     const parentToken = dirs.dirTokens[parentRel]
@@ -370,15 +403,19 @@ export async function feishuPush(spec, opts = {}) {
       ? ['markdown', '+overwrite', '--file-token', rf.fileToken, '--file', rel, '--format', 'json', '--as', 'user']
       : ['markdown', '+create', '--name', basename(rel), '--file', rel, '--folder-token', parentToken, '--format', 'json', '--as', 'user']
     const r = unwrap(await runLark(args, { ...opts, cwd: s.cacheDir, timeoutMs: opts.timeoutMs || FEISHU_FULL_TIMEOUT_MS }))
+    if (!r.ok) return { rel, error: r.error, next: r.next }
+    const token = (r.data && (r.data.file_token || r.data.token)) || (rf && rf.fileToken)
+    const st = local.get(rel)
+    return { rel, ok: true, token, isNew: !rf, mtimeMs: st.mtimeMs, size: st.size }
+  })
+  for (const r of results) {
     if (!r.ok) {
-      failed.push({ rel, error: r.error, next: r.next })
+      failed.push({ rel: r.rel, error: r.error, next: r.next })
       continue
     }
-    const token = (r.data && (r.data.file_token || r.data.token)) || (rf && rf.fileToken)
-    pushed.push(rel)
-    if (!rf) created.push(rel)
-    const st = local.get(rel)
-    idx.files[rel] = { fileToken: token, remoteModified: 0, localMtimeMs: st.mtimeMs, localSize: st.size }
+    pushed.push(r.rel)
+    if (r.isNew) created.push(r.rel)
+    idx.files[r.rel] = { fileToken: r.token, remoteModified: 0, localMtimeMs: r.mtimeMs, localSize: r.size }
   }
   idx.lastSyncAt = new Date().toISOString()
   await writeIndex(s.cacheDir, idx)

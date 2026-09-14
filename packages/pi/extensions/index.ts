@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 扩展版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const PI_VERSION = "0.4.2";
+const PI_VERSION = "0.4.3";
 
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;

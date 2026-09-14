@@ -10,6 +10,9 @@
  *   FAKE_LARK_LOG    调用日志路径（每行一个 JSON：{argv}）
  *   FAKE_LARK_ROOT   根文件夹 token（默认 fldcnROOT）
  *
+ * 并发安全：core 会并发调用（并发度 6），假桩用 <STATE>.lock 串行化 + 原子替换写状态；
+ * 每次调用都会释放锁，被 kill 留下的陈旧锁 10s 后自动接管。
+ *
  * 支持：
  *   auth status --format json
  *   drive files list --params '{"folder_token":...}'
@@ -19,7 +22,7 @@
  *   markdown +fetch --file-token T [--output rel] [--overwrite]
  */
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, unlinkSync, openSync, closeSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 const argv = process.argv.slice(2)
@@ -27,6 +30,44 @@ const STATE = process.env.FAKE_LARK_STATE
 const LOG = process.env.FAKE_LARK_LOG
 const ROOT = process.env.FAKE_LARK_ROOT || 'fldcnROOT'
 
+/**
+ * 并发安全：core 现在会并发调用 lark-cli（列表/拉取/推送并发度 6），
+ * 而真 CLI 背后是服务端、天然并发安全；假桩共用一份 JSON 状态文件，
+ * 必须自己加锁 + 原子替换，否则并发调用会互相覆盖（丢文件/丢目录）。
+ */
+const LOCK = STATE ? `${STATE}.lock` : null
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+let locked = false
+function acquireLock() {
+  if (!LOCK) return
+  const deadline = Date.now() + 20000
+  for (;;) {
+    try {
+      closeSync(openSync(LOCK, 'wx'))
+      locked = true
+      return
+    } catch (err) {
+      if (err.code !== 'EEXIST') return
+      // 陈旧锁（进程被杀）超过 10s 直接接管
+      try {
+        if (Date.now() - statSync(LOCK).mtimeMs > 10000) unlinkSync(LOCK)
+      } catch {
+        /* 锁已被别人释放 */
+      }
+      if (Date.now() > deadline) throw new Error(`fake lark-cli: 等锁超时 ${LOCK}`)
+      sleepSync(3)
+    }
+  }
+}
+function releaseLock() {
+  if (!locked) return // 读命令不持锁，绝不能删别人的锁
+  locked = false
+  try {
+    unlinkSync(LOCK)
+  } catch {
+    /* 已释放 */
+  }
+}
 function load() {
   try {
     return JSON.parse(readFileSync(STATE, 'utf8'))
@@ -36,13 +77,17 @@ function load() {
 }
 function save(st) {
   mkdirSync(dirname(STATE), { recursive: true })
-  writeFileSync(STATE, JSON.stringify(st, null, 2))
+  const tmp = `${STATE}.${process.pid}.tmp`
+  writeFileSync(tmp, JSON.stringify(st, null, 2))
+  renameSync(tmp, STATE)
 }
 function ok(data) {
+  releaseLock()
   process.stdout.write(JSON.stringify({ ok: true, identity: 'user', data }) + '\n')
   process.exit(0)
 }
 function fail(message, type = 'api_error') {
+  releaseLock()
   process.stdout.write(JSON.stringify({ ok: false, identity: 'user', error: { type, message } }) + '\n')
   process.exit(1)
 }
@@ -71,6 +116,8 @@ function relOfDirToken(st, token) {
 if (LOG) appendFileSync(LOG, JSON.stringify({ argv }) + '\n')
 
 const [domain, cmd] = argv
+// 只有写命令需要串行化；读命令靠 save() 的原子替换（tmp+rename）保证读不到半截状态
+if ((domain === 'drive' && cmd === '+create-folder') || (domain === 'markdown' && (cmd === '+create' || cmd === '+overwrite'))) acquireLock()
 const st = load()
 
 if (domain === 'auth' && cmd === 'status') {

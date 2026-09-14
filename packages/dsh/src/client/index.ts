@@ -172,6 +172,7 @@ function Card() {
   const [err, setErr] = React.useState('')
   const [notice, setNotice] = React.useState('')
   const [busy, setBusy] = React.useState(false)
+  const syncSeq = React.useRef(0)
   const [confirmingRemove, setConfirmingRemove] = React.useState('')
   const [addName, setAddName] = React.useState('')
   const [addPath, setAddPath] = React.useState('')
@@ -180,6 +181,7 @@ function Card() {
   const [newFolderName, setNewFolderName] = React.useState('')
   const [viewBundle, setViewBundle] = React.useState('')
   const [syncInfo, setSyncInfo] = React.useState(null)
+  const [syncLoading, setSyncLoading] = React.useState(false)
   const [health, setHealth] = React.useState(null)
   const [remoteUrl, setRemoteUrl] = React.useState('')
   const [cloneUrl, setCloneUrl] = React.useState('')
@@ -213,20 +215,32 @@ function Card() {
     void run(() => load())
   }, [state, run, load])
 
+  // 在线状态是只读查询（飞书要列远端目录，秒级），不能占用 busy 把整张卡片锁死：
+  // 单独 loading 标记 + 序号防乱序（切换目标目录时旧响应不许覆盖新响应）。
   const loadSync = React.useCallback(async (bundle) => {
-    const r = await api(`/sync${bundle ? `?bundle=${encodeURIComponent(bundle)}` : ''}`)
-    setSyncInfo(r)
+    const seq = syncSeq.current + 1
+    syncSeq.current = seq
+    setSyncLoading(true)
+    try {
+      const r = await api(`/sync${bundle ? `?bundle=${encodeURIComponent(bundle)}` : ''}`)
+      if (syncSeq.current === seq) setSyncInfo({ ...r, forBundle: bundle })
+    } catch (error) {
+      if (syncSeq.current === seq) setErr(error && error.message ? error.message : String(error))
+    } finally {
+      if (syncSeq.current === seq) setSyncLoading(false)
+    }
   }, [])
 
   React.useEffect(() => {
     if (!open) return
-    void run(() => loadSync(viewBundle))
+    void loadSync(viewBundle)
     setHealth(null)
-  }, [open, viewBundle, run, loadSync])
+  }, [open, viewBundle, loadSync])
 
   const bundleNames = state ? state.entries.map((x) => x.name) : []
   const activeEntry = state ? state.entries.find((x) => x.name === viewBundle) : null
   const isFeishu = Boolean(activeEntry && activeEntry.kind === 'feishu')
+  const sync = syncInfo && syncInfo.forBundle === viewBundle ? syncInfo : null
 
   const afterMutation = async (message) => {
     setNotice(message)
@@ -269,6 +283,7 @@ function Card() {
       { className: 'dwBody' },
       err ? e('div', { className: 'dwWarn' }, `✕ ${err}`) : null,
       notice ? e('div', { className: 'dwOk' }, `✓ ${notice}`) : null,
+      busy ? e('div', { className: 'dwHint' }, '执行中…（首次同步要拉取上百个文件，约 1 分钟；请勿关闭页面，完成后自动刷新状态）') : null,
 
       // ── A 命名 bundle 管理 ──
       e(
@@ -330,35 +345,45 @@ function Card() {
               return e('option', { key: n, value: n }, `${n}${entry && entry.kind === 'feishu' ? '（飞书）' : ''}`)
             }),
           ),
-          e('button', { className: 'dwBtn', disabled: busy, onClick: () => run(() => loadSync(viewBundle)) }, '刷新状态'),
+          e('button', { className: 'dwBtn', disabled: busy || syncLoading, onClick: () => loadSync(viewBundle) }, syncLoading ? '读取中…' : '刷新状态'),
         ),
         isFeishu
           ? e(
               'div',
               null,
-              syncInfo && syncInfo.feishu && syncInfo.feishu.ok
+              syncLoading && !sync
+                ? e('div', { className: 'dwHint' }, '正在读取飞书状态…（列远端目录，通常 2–5 秒）')
+                : null,
+              sync && sync.feishu && sync.feishu.ok
                 ? e(
                     'div',
                     null,
-                    e('div', { className: 'dwHint' }, `待推送 ${syncInfo.feishu.counts.push}｜待拉取 ${syncInfo.feishu.counts.pull}｜冲突 ${syncInfo.feishu.counts.conflict}｜本地 ${syncInfo.feishu.counts.local} 个 .md，远端 ${syncInfo.feishu.counts.remote} 个 .md`),
+                    e('div', { className: 'dwHint' }, `待推送 ${sync.feishu.counts.push}｜待拉取 ${sync.feishu.counts.pull}｜冲突 ${sync.feishu.counts.conflict}｜本地 ${sync.feishu.counts.local} 个 .md，远端 ${sync.feishu.counts.remote} 个 .md`),
                     activeEntry && activeEntry.folderUrl ? e('div', { className: 'dwHint' }, `文件夹：${activeEntry.folderUrl}`) : null,
                     activeEntry && activeEntry.cacheDir ? e('div', { className: 'dwHint' }, `本地缓存：${activeEntry.cacheDir}`) : null,
-                    syncInfo.feishu.conflict.length ? e('div', { className: 'dwWarn' }, `冲突（两侧都改，需人工处理）：${syncInfo.feishu.conflict.map((x) => x.rel).join('、')}`) : null,
-                    syncInfo.feishu.remoteDeleted.length ? e('div', { className: 'dwHint' }, `远端已删（本地保留）：${syncInfo.feishu.remoteDeleted.join('、')}`) : null,
-                    syncInfo.feishu.ignored && syncInfo.feishu.ignored.length ? e('div', { className: 'dwHint' }, `已忽略的非 .md 资源：${syncInfo.feishu.ignored.slice(0, 5).join('、')}`) : null,
+                    sync.feishu.ignored && sync.feishu.ignored.length ? e('div', { className: 'dwHint' }, `已忽略的非 .md 资源：${sync.feishu.ignored.slice(0, 5).join('、')}`) : null,
                   )
-                : e(
+                : null,
+              sync && sync.feishu && sync.feishu.conflict && sync.feishu.conflict.length
+                ? e('div', { className: 'dwWarn' }, `冲突（两侧都改，需人工处理）：${sync.feishu.conflict.map((x) => x.rel).join('、')}`)
+                : null,
+              sync && sync.feishu && sync.feishu.remoteDeleted && sync.feishu.remoteDeleted.length
+                ? e('div', { className: 'dwHint' }, `远端已删（本地保留）：${sync.feishu.remoteDeleted.join('、')}`)
+                : null,
+              !syncLoading && !(sync && sync.feishu && sync.feishu.ok)
+                ? e(
                     'div',
                     null,
-                    e('div', { className: 'dwHint' }, (syncInfo && syncInfo.feishu && syncInfo.feishu.error) || '飞书状态不可用（需要 lark-cli 已登录）'),
-                    syncInfo && syncInfo.feishu && syncInfo.feishu.next ? e('div', { className: 'dwHint' }, syncInfo.feishu.next) : null,
-                  ),
+                    e('div', { className: 'dwHint' }, (sync && sync.feishu && sync.feishu.error) || '飞书状态不可用（需要 lark-cli 已登录）'),
+                    sync && sync.feishu && sync.feishu.next ? e('div', { className: 'dwHint' }, sync.feishu.next) : null,
+                  )
+                : null,
               e(
                 'div',
                 { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 } },
-                e('button', { className: 'dwBtn dwBtnPrimary', disabled: busy || !(syncInfo && syncInfo.feishu && syncInfo.feishu.ok), onClick: () => run(async () => { const r = await post('/sync', { op: 'sync', bundle: viewBundle }); setNotice(`同步完成：推送 ${(r.pushed || []).length}，拉取 ${(r.pulled || []).length}`); await loadSync(viewBundle) }) }, '一键同步'),
-                e('button', { className: 'dwBtn', disabled: busy || !(syncInfo && syncInfo.feishu && syncInfo.feishu.ok), onClick: () => run(async () => { const r = await post('/sync', { op: 'pull', bundle: viewBundle }); setNotice(`已拉取 ${(r.pulled || []).length} 个文件`); await loadSync(viewBundle) }) }, '拉取'),
-                e('button', { className: 'dwBtn', disabled: busy || !(syncInfo && syncInfo.feishu && syncInfo.feishu.ok), onClick: () => run(async () => { const r = await post('/sync', { op: 'push', bundle: viewBundle }); setNotice(`已推送 ${(r.pushed || []).length} 个文件`); await loadSync(viewBundle) }) }, '推送'),
+                e('button', { className: 'dwBtn dwBtnPrimary', disabled: busy || syncLoading || !(sync && sync.feishu && sync.feishu.ok), onClick: () => run(async () => { const r = await post('/sync', { op: 'sync', bundle: viewBundle }); setNotice(`同步完成：推送 ${(r.pushed || []).length}，拉取 ${(r.pulled || []).length}`); await loadSync(viewBundle) }) }, '一键同步'),
+                e('button', { className: 'dwBtn', disabled: busy || syncLoading || !(sync && sync.feishu && sync.feishu.ok), onClick: () => run(async () => { const r = await post('/sync', { op: 'pull', bundle: viewBundle }); setNotice(`已拉取 ${(r.pulled || []).length} 个文件`); await loadSync(viewBundle) }) }, '拉取'),
+                e('button', { className: 'dwBtn', disabled: busy || syncLoading || !(sync && sync.feishu && sync.feishu.ok), onClick: () => run(async () => { const r = await post('/sync', { op: 'push', bundle: viewBundle }); setNotice(`已推送 ${(r.pushed || []).length} 个文件`); await loadSync(viewBundle) }) }, '推送'),
                 activeEntry && activeEntry.folderUrl ? e('a', { className: 'dwBtn', href: activeEntry.folderUrl, target: '_blank', rel: 'noreferrer' }, '在飞书中打开') : null,
               ),
             )
@@ -366,31 +391,31 @@ function Card() {
               'div',
               null,
               state && state.git && state.git.ok === false ? e('div', { className: 'dwWarn' }, `✕ ${state.git.error || 'git 不可用'}`) : null,
-              syncInfo && syncInfo.git
-                ? syncInfo.git.ok
+              sync && sync.git
+                ? sync.git.ok
                   ? e(
                       'div',
                       null,
-                      e('div', { className: 'dwHint' }, `远端：${syncInfo.git.remote || '（未配置）'}｜分支：${syncInfo.git.branch || '(detached)'}${syncInfo.git.upstream ? ` → ${syncInfo.git.upstream}` : ''}｜领先 ${syncInfo.git.ahead} / 落后 ${syncInfo.git.behind}｜改动 ${syncInfo.git.dirty.length} 个文件`),
-                      syncInfo.git.lastCommit ? e('div', { className: 'dwHint' }, `最后提交：${syncInfo.git.lastCommit}`) : null,
-                      syncInfo.git.conflicts && syncInfo.git.conflicts.length ? e('div', { className: 'dwWarn' }, `存在冲突：${syncInfo.git.conflicts.join('、')}`) : null,
+                      e('div', { className: 'dwHint' }, `远端：${sync.git.remote || '（未配置）'}｜分支：${sync.git.branch || '(detached)'}${sync.git.upstream ? ` → ${sync.git.upstream}` : ''}｜领先 ${sync.git.ahead} / 落后 ${sync.git.behind}｜改动 ${sync.git.dirty.length} 个文件`),
+                      sync.git.lastCommit ? e('div', { className: 'dwHint' }, `最后提交：${sync.git.lastCommit}`) : null,
+                      sync.git.conflicts && sync.git.conflicts.length ? e('div', { className: 'dwWarn' }, `存在冲突：${sync.git.conflicts.join('、')}`) : null,
                     )
                   : e(
                       'div',
                       null,
-                      e('div', { className: 'dwHint' }, syncInfo.git.error || 'git 状态不可用'),
-                      syncInfo.git.next ? e('div', { className: 'dwHint' }, syncInfo.git.next) : null,
+                      e('div', { className: 'dwHint' }, sync.git.error || 'git 状态不可用'),
+                      sync.git.next ? e('div', { className: 'dwHint' }, sync.git.next) : null,
                     )
-                : e('div', { className: 'dwHint' }, '正在读取 git 状态…'),
+                : e('div', { className: 'dwHint' }, syncLoading ? '正在读取 git 状态…' : '（未读取到状态，点「刷新状态」重试）'),
               e(
                 'div',
                 { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 } },
-                e('button', { className: 'dwBtn dwBtnPrimary', disabled: busy, onClick: () => run(async () => { const r = await post('/sync', { op: 'sync', bundle: viewBundle }); setNotice(`已同步${r.merged ? '（含远端合并）' : ''}${r.pushed ? ' 并推送' : ''}`); await loadSync(viewBundle) }) }, syncInfo && syncInfo.git && syncInfo.git.ok ? '立即同步' : '重试同步'),
-                syncInfo && syncInfo.git && syncInfo.git.ok
+                e('button', { className: 'dwBtn dwBtnPrimary', disabled: busy, onClick: () => run(async () => { const r = await post('/sync', { op: 'sync', bundle: viewBundle }); setNotice(`已同步${r.merged ? '（含远端合并）' : ''}${r.pushed ? ' 并推送' : ''}`); await loadSync(viewBundle) }) }, sync && sync.git && sync.git.ok ? '立即同步' : '重试同步'),
+                sync && sync.git && sync.git.ok
                   ? null
                   : e('button', { className: 'dwBtn', disabled: busy || !remoteUrl, onClick: () => run(async () => { await post('/sync', { op: 'init', bundle: viewBundle, remote: remoteUrl }); setRemoteUrl(''); await afterMutation('已初始化远端并首推') }) }, '初始化远端并首推'),
               ),
-              syncInfo && syncInfo.git && syncInfo.git.ok ? null : e(Field, { label: '远端 URL（init 用）', value: remoteUrl, placeholder: 'git@host:group/wiki.git', disabled: busy, onChange: setRemoteUrl }),
+              sync && sync.git && sync.git.ok ? null : e(Field, { label: '远端 URL（init 用）', value: remoteUrl, placeholder: 'git@host:group/wiki.git', disabled: busy, onChange: setRemoteUrl }),
               e('button', { className: 'dwBtn', onClick: () => setShowClone(!showClone), disabled: busy }, showClone ? '收起「克隆远端」' : '克隆远端到本地…'),
               showClone
                 ? e(
