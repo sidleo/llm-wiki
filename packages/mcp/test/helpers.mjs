@@ -23,6 +23,9 @@ export const TOOL_NAMES = [
 /** 允许与 DSH 措辞分歧的工具（改写的都是形态相关内容，结构必须一致）。 */
 export const DIVERGENT = new Set(['wiki_dirs', 'wiki_use', 'wiki_rules', 'wiki_sync'])
 
+/** 前置了「何时用」触发段的读类工具（MCP 无保证注入通道，靠工具描述兜）。 */
+export const WHEN_PREFIXED = new Set(['wiki_list', 'wiki_search', 'wiki_get', 'wiki_rules'])
+
 /**
  * 用 mock ctx 加载 dsh 插件的工具表（与 tests/dsh-mock-test.mjs 同一套 mock 形态，
  * 不依赖真实 dsh 运行时）。

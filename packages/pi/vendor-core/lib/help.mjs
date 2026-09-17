@@ -254,26 +254,31 @@ bundle 仍是本地 markdown 目录树，远端同步让多台机器 / 多人 / 
   prompt: doc(
     '给没有注入能力的宿主配常驻要求（wiki prompt）',
     `
-背景：三形态里 DSH 插件（system-prompt 瀑布）与 pi 扩展（before_agent_start 钩子）
-都能自己把规则注入 system prompt，agent 无需记得。**skill/CLI 形态的宿主
-（豆包 / WorkBuddy / 其他 GUI agent）没有这种钩子**——宿主只在它认为相关时才加载
-SKILL.md，加载与否、加载后是否真去查库，都不由我们决定。
+背景：四形态里 DSH 插件（system-prompt 瀑布）、pi 扩展（before_agent_start 钩子）、
+MCP 服务端（initialize 的 instructions 字段）都能自己把规则下发给 agent。**但两处仍需常驻要求**：
+(1) skill/CLI 形态的宿主（豆包 / WorkBuddy / 其他 GUI agent）没有注入钩子，
+宿主只在它认为相关时才加载 SKILL.md，加载与否、加载后是否真去查库都不由我们决定；
+(2) **MCP 宿主不一定读 instructions**（多数 GUI 只把工具列表给模型），
+那时"何时必须查库"这类触发条件就没人告诉 agent——表现为「agent 从不主动调 wiki 工具，要我点名才调」。
 
 做法：\`wiki prompt\` 打印一段可直接粘贴的常驻要求，把它写进**宿主自己的**
 「自定义指令 / 系统提示词 / 项目 AGENTS.md」，就等于给宿主补上了每轮注入：
 
-- \`wiki prompt\` —— 带使用说明的输出（虚线以下整段粘贴）
+- \`wiki prompt\` —— 带使用说明的输出（虚线以下整段粘贴），**CLI 形态文案**
 - \`wiki prompt --raw\` —— 只输出正文（便于脚本/agent 直接写文件）
+- \`wiki prompt --mcp\` —— **MCP 形态文案**：说 \`wiki_*\` 工具名与「何时必须查库」的触发条件；
+  宿主已配 wiki MCP 服务端时用这段，否则 CLI 文案会反向引导 agent 去 bash 调 \`wiki\`
 - \`wiki prompt --full\` —— 追加在线同步与体检条款
 
 正文覆盖：先查库再回答（不许凭记忆答表结构与口径）、主动记录（新表/坑点/确认过的口径）、
-写入门控（需 human 确认的类型先征得同意再加 --confirmed）、收尾 lint、CLI 绝对路径兜底、
-多库切换。默认库名与路径按当前注册表动态填入。
+写入门控（需 human 确认的类型先征得同意再加 confirmed:true）、收尾 lint、多库切换。
+默认库名与路径按当前注册表动态填入。
 
 常见位置：WorkBuddy 设置 → 个性化 → 自定义指令；GUI agent 的系统提示词；
-CLI agent 的项目 AGENTS.md。DSH / pi 不需要（已自动注入同一套内容）。
+CLI agent 的项目 AGENTS.md（Claude Code 用 ~/.claude/CLAUDE.md 或项目 CLAUDE.md，
+Codex 用 ~/.codex/AGENTS.md）。DSH / pi 不需要（已自动注入同一套内容）。
 
-换宿主时的通用姿势：新宿主里能跑命令的话，直接执行 \`wiki prompt\` 把输出贴进它的指令栏即可。`,
+换宿主时的通用姿势：新宿主里能跑命令的话，直接执行 \`wiki prompt [--mcp]\` 把输出贴进它的指令栏即可。`,
   ),
 }
 

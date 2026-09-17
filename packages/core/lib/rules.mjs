@@ -146,7 +146,7 @@ export async function formatRuleAppendix(root, dir = '') {
     if (section) parts.push(`===== ${r.path}（「## 门控」节）=====\n${section}`)
   }
   if (!parts.length) return ''
-  return `【${dir || 'bundle 根'} 生效规则】（本形态无 system prompt 注入，规则随响应附带）\n\n${parts.join('\n\n')}`
+  return `【${dir || 'bundle 根'} 生效规则】（规则随响应附带；各形态的注入通道见 instructions / SKILL.md）\n\n${parts.join('\n\n')}`
 }
 
 /**

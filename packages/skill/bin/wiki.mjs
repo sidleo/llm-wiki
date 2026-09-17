@@ -52,7 +52,7 @@ async function loadCore() {
 }
 
 /** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const CLI_VERSION = '0.4.13'
+const CLI_VERSION = '0.4.14'
 
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
@@ -480,7 +480,9 @@ async function main() {
     case 'prompt': {
       // 给「不自带注入能力」的宿主（豆包 / WorkBuddy / 其他 GUI agent）配常驻要求：
       // 打印可直接粘贴的文本，由用户或 agent 写进宿主的自定义指令 / 系统提示词 / AGENTS.md
+      // --mcp：宿主已配 wiki MCP 服务端时改用 MCP 工具文案（避免引导它去 bash 调 CLI）
       const full = has(rest, '--full')
+      const form = has(rest, '--mcp') ? 'mcp' : 'cli'
       let name = ''
       let path = ''
       try {
@@ -491,8 +493,8 @@ async function main() {
         // 未注册也照常输出（正文里会提示先跑 wiki dirs）
       }
       const text = has(rest, '--raw')
-        ? core.buildAgentPrompt({ name, path, full })
-        : core.buildAgentPromptDoc({ name, path, full })
+        ? core.buildAgentPrompt({ name, path, full, form })
+        : core.buildAgentPromptDoc({ name, path, full, form })
       console.log(text)
       break
     }

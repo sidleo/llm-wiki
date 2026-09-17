@@ -14,7 +14,7 @@ import { mkdtemp, cp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { ROOT, DEMO, TOOL_NAMES, DIVERGENT, loadDshTools, stripDescriptions } from './helpers.mjs'
+import { ROOT, DEMO, TOOL_NAMES, DIVERGENT, WHEN_PREFIXED, loadDshTools, stripDescriptions } from './helpers.mjs'
 import { createWiki } from '../lib/tools.mjs'
 import { loadCore } from '../lib/core.mjs'
 import { MCP_VERSION } from '../lib/config.mjs'
@@ -68,12 +68,22 @@ describe('MCP 形态与 DSH 插件对拍', () => {
     }
   })
 
-  test('工具描述逐字一致（分歧工具除外，且必须非空）', () => {
+  test('工具描述：DSH 文案原样保留，MCP 只允许前置「何时用」触发段', () => {
     for (const name of TOOL_NAMES) {
       const mine = mcp.tools.get(name)
       const theirs = dsh.get(name)
       assert.ok(mine.description && mine.description.length > 0, `${name} 描述为空`)
-      if (!DIVERGENT.has(name)) {
+      if (WHEN_PREFIXED.has(name)) {
+        // MCP 无保证注入通道：读类工具必须首行给触发条件（否则 agent 不会主动查库）
+        assert.ok(mine.description.startsWith('【何时用】'), `${name} 缺少首行「何时用」触发段`)
+      }
+      if (DIVERGENT.has(name)) continue
+      if (WHEN_PREFIXED.has(name)) {
+        assert.ok(
+          mine.description.includes(theirs.description),
+          `${name} 的 DSH 文案被改动或被覆盖（只允许在前面追加触发段）`,
+        )
+      } else {
         assert.equal(mine.description, theirs.description, `${name} 的描述漂了`)
       }
     }

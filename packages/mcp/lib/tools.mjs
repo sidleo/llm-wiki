@@ -6,13 +6,25 @@
  * **进程级 override**（一个 stdio server 进程 ≈ 一个宿主会话）；global:true 仍写共享注册表。
  *
  * 工具描述里凡涉及 DSH 特有的东西（图形化配置卡片、按对话隔离）都按本形态改写，
- * 其余逐字照搬——test/parity.test.mjs 会盯住这件事。
+ * 其余逐字照搬；读类工具额外前置 WHEN_TO_USE 触发段（MCP 无保证注入通道，见其注释）——
+ * 两件事都由 test/parity.test.mjs 盯住。
  */
 
 import { dirname } from 'node:path'
 import { DEFAULTS, MCP_VERSION, PRODUCER } from './config.mjs'
 import { buildContextText } from './instructions.mjs'
 import { formatFeishuResult, formatGitResult } from './format.mjs'
+
+/**
+ * 「何时必须查库」触发段（MCP 独有，前置到读类工具描述的第一行）。
+ *
+ * 为什么 dsh/pi 不需要而 MCP 需要：那两个宿主每轮把引导注入 system prompt，
+ * 触发条件必然到达 agent；MCP 只有 initialize 的 instructions，而**不少宿主只把
+ * 工具列表交给模型、并不读 instructions**——那时 agent 唯一的线索就是工具描述。
+ * 把触发条件放描述首行，「用户问口径 → agent 主动调 wiki」才成立。
+ */
+const WHEN_TO_USE =
+  '【何时用】用户问到某张表/字段/表结构、指标怎么算或口径是什么、该从哪张表取数、要写或改 SQL、数据对不上或口径不一致、某张表有什么坑 —— 必须先调用本工具查库，不要凭记忆回答。'
 
 function strErr(e) {
   return { text: `错误：${e && e.message ? e.message : String(e)}` }
@@ -92,6 +104,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
   add(
     'wiki_list',
     [
+      WHEN_TO_USE,
       '列出 llm-wiki 知识库（OKF v0.2 bundle）的目录树与概念清单。',
       '【硬要求】做任何知识相关工作的第一步，必须先调用本工具看全貌，再决定下一步。',
     ],
@@ -125,6 +138,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
   add(
     'wiki_search',
     [
+      WHEN_TO_USE,
       '搜索 llm-wiki 知识库：匹配 frontmatter（type/title/description/tags）+ 正文；支持词元拆分与量词后缀兜底；强匹配标 ★ 排前。',
       '支持 type 与 tag 过滤。未命中会提示用 wiki_list / wiki_lint。',
     ],
@@ -155,7 +169,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
   // ──────────────────────────── wiki_get ────────────────────────────
   add(
     'wiki_get',
-    '读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。',
+    `${WHEN_TO_USE}\n读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。`,
     {
       type: 'object',
       properties: { id: { type: 'string', description: 'Concept ID（如 tables/orders）或 title' } },
@@ -348,7 +362,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
   // ──────────────────────────── wiki_rules ────────────────────────────
   add(
     'wiki_rules',
-    '查看某目录生效的规则：APPEND_SYSTEM_PROMPT.md（行为规则，= 连接时经 instructions 下发的内容）+ AGENTS.md（门控/写入规则，向上遍历取最近、子覆盖父）。不带 path 时返回本 bundle 全部 APPEND + 根 AGENTS.md。写入前先看它确认门控。',
+    `${WHEN_TO_USE}\n查看某目录生效的规则：APPEND_SYSTEM_PROMPT.md（行为规则，= 连接时经 instructions 下发的内容）+ AGENTS.md（门控/写入规则，向上遍历取最近、子覆盖父）。不带 path 时返回本 bundle 全部 APPEND + 根 AGENTS.md。写入前先看它确认门控。`,
     {
       type: 'object',
       properties: { path: { type: 'string', description: '目录（bundle 相对，空=根；不传则返回全部 APPEND）' } },

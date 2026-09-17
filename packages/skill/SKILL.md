@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 0.4.13
+version: 0.4.14
 description: >-
   工作知识库（表结构/字段/指标口径/SQL 取数经验/踩坑记录/业务流程），OKF v0.2 markdown
   bundle，用 `wiki` CLI 读写。**以下情况先用本 skill 查库，不要凭记忆或印象回答**：
@@ -103,7 +103,7 @@ metadata:
 | `wiki ingest SOURCE [--ref-dir DIR]` | 登记外部源文件进 bundle（copy 不改源） |
 | `wiki deprecate DIR` | 目录级批量标 `status: deprecated` |
 | `wiki rules [DIR]` | **载入规则**：不带 DIR = 本 bundle 全部 `APPEND_SYSTEM_PROMPT.md` 正文（= 本应被注入的全文）+ 根 AGENTS.md；带 DIR = 该目录生效的 APPEND 链 + AGENTS.md 门控链 |
-| `wiki prompt [--raw] [--full]` | 生成「宿主常驻要求」文本（贴进宿主的自定义指令/系统提示词；换宿主通用，见 `wiki help prompt`） |
+| `wiki prompt [--raw] [--full] [--mcp]` | 生成「宿主常驻要求」文本（贴进宿主的自定义指令/系统提示词）；`--mcp` 输出 MCP 工具版文案，见 `wiki help prompt` |
 | `wiki index [DIR]` | 重生成目录 index.md（写操作已自动维护，手工修复时用） |
 | `wiki sync [status\|pull\|push]` | 在线同步（按 bundle 后端分派）：Git 远端或飞书云盘库；`status` 只读 |
 | `wiki sync init --remote URL [--name N] [--use]` | 本地 bundle 挂 Git 远端并首推 |
