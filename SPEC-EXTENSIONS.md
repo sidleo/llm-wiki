@@ -8,7 +8,7 @@
 
 **本项目的扩展**：将 `AGENTS.md`（任意层级）追加为保留文件——无 frontmatter、不作 concept、不参与 type 校验，语义为「该目录（及整棵子树）的 agent 规则」（写门控、宿主约定等）。规则解析采用「向上遍历取最近 + 逐级叠加、子目录覆盖父目录」。
 
-**动机**：`AGENTS.md` 在 agent 生态（Claude Code / Codex / pi 等）已有「按目录自动加载规则」的既有语义。本项目将知识库的目录级「怎么写、写前是否需确认」等规则承载于此，使规则与知识同库、随 bundle 分发、三形态行为一致。
+**动机**：`AGENTS.md` 在 agent 生态（Claude Code / Codex / pi 等）已有「按目录自动加载规则」的既有语义。本项目将知识库的目录级「怎么写、写前是否需确认」等规则承载于此，使规则与知识同库、随 bundle 分发、四形态行为一致。
 
 ## 扩展 2：`APPEND_SYSTEM_PROMPT.md` 作为保留文件（目录提示词注入）
 
@@ -16,15 +16,16 @@
 
 **动机**：本项目是通用知识库，宿主插件**不含任何场景写死的提示词**。各分类可放一个 `APPEND_SYSTEM_PROMPT.md` 声明自己的「行为规则」——注入层每轮把根 + 全部子目录的该文件正文，连同当前 bundle（名 + 路径）与目录清单一起下发给 agent。例：在 `业务/sql/` 下放一份写「用了库中没有的表→自动建 Table、踩坑→自动记 Pitfall、新口径先确认」的规则，就实现了该分类的主动记录行为；其他用途的知识库不写它也能用。
 
-**注入通道（宿主相关，语义一致）**：三形态最终都是「agent 在做该分类工作前看到规则正文」，但通道不同，且都做到改动即时生效：
+**注入通道（宿主相关，语义一致）**：四形态最终都是「agent 在做该分类工作前看到规则正文」，但通道不同：
 
 | 形态 | 通道 | 注入口 |
 |------|------|--------|
-| DSH 插件 | `system-prompt/assemble` 瀑布：工具引导 = **恒定 section**（任何会话/分支逐字节相同）；bundle/目录/规则 = **runtime context 快照**（会话尾部，内容未变不产生新消息） | `wiki_list` 等 14 个工具 + 注入层 |
+| DSH 插件 | `system-prompt/assemble` 瀑布：工具引导 = **恒定 section**（任何会话/分支逐字节相同）；bundle/目录/规则 = **runtime context 快照**（会话尾部，内容未变不产生新消息）；改动下一轮自动重读 | `wiki_list` 等 14 个工具 + 注入层 |
 | pi 扩展 | `before_agent_start` 钩子：事件带已组装好的 `systemPrompt`，处理器每回合**现读**规则并返回追加后的字符串（多扩展链式，失败不影响本轮） | 14 个 `wiki_*` 工具 |
+| MCP 服务端 | `initialize` 响应的 **`instructions` 字段**：恒定引导 + 当前 bundle/目录/APPEND 规则一次下发（协议只在连接时下发一次）；改动后重连，或靠 `wiki_rules` / `wiki get/create/update` 响应附带补上 | 14 个 `wiki_*` 工具（stdio） |
 | skill / CLI | 宿主无注入钩子：`wiki rules`（无参数）载入全部规则全文；`wiki get/create/update` 响应末尾**自动附带**目标目录生效规则 | `wiki` CLI |
 
-DSH 之所以把规则放在 runtime context 而非 system prompt：那是整体字符串，任何一字节变化的最小代价是重发一整份 prompt。pi 的注入内容在文件未改时逐回合字节相同，因此前缀缓存同样保持有效。skill 形态把规则**附在数据响应上**（与 backlinks 同一招），这样即使 agent 忘了先跑 `wiki rules`，读写时也一定会看到规则与门控。相应地，**概念计数不参与注入**（每次写入都会变的高频源），清单按需用 `wiki_list` / `wiki_dirs` 获取。
+DSH 之所以把规则放在 runtime context 而非 system prompt：那是整体字符串，任何一字节变化的最小代价是重发一整份 prompt。pi 的注入内容在文件未改时逐回合字节相同，因此前缀缓存同样保持有效。MCP 的 `instructions` 是单一静态字段，所以**规则随数据到达**这条路必须留着：`wiki rules` 显式入口 + `wiki get/create/update` 响应附带 + `wiki_use` 切库时把新库规则附在结果里。skill 形态同理，把规则**附在数据响应上**（与 backlinks 同一招），即使 agent 忘了先跑 `wiki rules`，读写时也一定会看到规则与门控。相应地，**概念计数不参与注入**（每次写入都会变的高频源），清单按需用 `wiki_list` / `wiki_dirs` 获取。
 
 **互操作影响评估**（扩展 1、2 公共）：
 

@@ -2,7 +2,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-An open-source, generic, agent-first knowledge base: **the format layer strictly follows the [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)**, and the operations layer follows Karpathy's [llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (ingest / query / lint + index / log). It ships in three consumption forms that share one core library and one data bundle.
+An open-source, generic, agent-first knowledge base: **the format layer strictly follows the [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)**, and the operations layer follows Karpathy's [llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (ingest / query / lint + index / log). It ships in four consumption forms that share one core library and one data bundle.
 
 ## Design Principles
 
@@ -14,7 +14,7 @@ An open-source, generic, agent-first knowledge base: **the format layer strictly
 - **Progressive disclosure** — every session carries injected tool guidance plus the active bundle/category list; `wiki_list` shows the whole tree first, then you search and drill in.
 - **Real cross-links + automatic backlinks** — concepts reference each other with Markdown links; reading a concept automatically surfaces the pitfalls and rules that cite it.
 - **Directory-level rules (`AGENTS.md`)** — per-directory write gates (which concept types need human confirmation) and behavioral conventions, resolved bottom-up with child directories overriding parents.
-- **Per-directory prompt injection (`APPEND_SYSTEM_PROMPT.md`)** — each category defines its own behavior rules; identical content across all three forms and effective immediately after an edit. DSH rides a constant section plus a runtime-context snapshot; the pi extension hooks `before_agent_start` to re-read them **every turn** and append them to that turn's system prompt; the skill/CLI form has no injection hook, so it uses `wiki rules` (no args = load every rule verbatim) plus rules automatically appended to `wiki get/create/update` responses — the rules travel with the data, so nothing depends on the agent remembering to load them. See [SPEC-EXTENSIONS.md](SPEC-EXTENSIONS.md).
+- **Per-directory prompt injection (`APPEND_SYSTEM_PROMPT.md`)** — each category defines its own behavior rules; identical content across all four forms and effective immediately after an edit. DSH rides a constant section plus a runtime-context snapshot; the pi extension hooks `before_agent_start` to re-read them **every turn** and append them to that turn's system prompt; the MCP server sends the same text through the `initialize` `instructions` field (the protocol only delivers it once per connection — reconnect or call `wiki rules` after an edit); the skill/CLI form has no injection hook, so it uses `wiki rules` (no args = load every rule verbatim) plus rules automatically appended to `wiki get/create/update` responses — the rules travel with the data, so nothing depends on the agent remembering to load them. See [SPEC-EXTENSIONS.md](SPEC-EXTENSIONS.md).
 - **Lifecycle** — `stale_after` expiry, `status: deprecated` (concept-level) and directory-level deprecation, auto-maintained `index.md` / `log.md`.
 - **Validation & health** — `wiki_validate` (OKF compliance) and `wiki_lint` (broken links, orphans, stale entries, missing index).
 - **Multiple bundles** — register several wiki directories as named bundles and switch between them (session-level or persisted globally).
@@ -56,6 +56,7 @@ llm-wiki/
 │   ├── core/               # Shared core: parse / link graph / search / validate / lint / index-log / rules
 │   ├── dsh/                # DSH plugin → npm @sidleo3/dsh-wiki
 │   ├── pi/                 # pi extension → npm @sidleo3/pi-wiki
+│   ├── mcp/                # MCP server (stdio) → npm @sidleo3/mcp-wiki
 │   └── skill/              # skill form → SKILL.md + `wiki` CLI
 ├── examples/demo-bundle/   # Synthetic demo bundle (openable in Obsidian)
 ├── scripts/                # Dev helper scripts
@@ -63,15 +64,16 @@ llm-wiki/
 └── obsidian/               # Obsidian templates / Dataview examples
 ```
 
-## Three Consumption Forms
+## Four Consumption Forms
 
 | Form | Install | Capability |
 |------|---------|-----------|
 | DSH plugin | `dsh plugin --profile web add @sidleo3/dsh-wiki` | Layered injection (constant section + runtime-context snapshot) + `wiki_*` tools |
 | pi extension | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` tools + prompt guidance + per-turn category rules via `before_agent_start` |
+| MCP server | see `packages/mcp/README.md` (absolute node path in the host's MCP config) | the same 14 `wiki_*` tools; rules delivered via `instructions` + response appendices; works in any MCP-capable host |
 | skill + CLI | `~/.agents/skills/wiki/` (see `packages/skill/INSTALL.md`) | SKILL.md guidance + `wiki` CLI (any agent harness); rules via `wiki rules` and get/create/update responses |
 
-All three forms read and write **the same bundle** with identical behavior — they reuse `packages/core`, no duplicated implementation.
+All four forms read and write **the same bundle** with identical behavior — they reuse `packages/core`, no duplicated implementation.
 
 ## Tools (14)
 
@@ -128,7 +130,7 @@ Settings → Plugins → Plugin configuration → llm-wiki card (the host render
 
 The default data directory is `~/.agents/wiki`. To manage several wiki directories, register them as named bundles:
 
-- **Registry file** (shared across all three forms; default `~/.agents/wiki-registry.json`, overridable via env `WIKI_REGISTRY_FILE`):
+- **Registry file** (shared across all four forms; default `~/.agents/wiki-registry.json`, overridable via env `WIKI_REGISTRY_FILE`):
 
   ```json
   { "bundles": { "work": "/abs/path/a", "personal": "~/notes/wiki" }, "active": "work" }
@@ -173,6 +175,7 @@ node --test tests/git-sync.test.mjs      # 8 checks: Git remote sync (sequential
 node --test tests/feishu-backend.test.mjs # 12 checks: Feishu cloud-drive backend (3-way diff, changed-files-only, conflict stop, log union, argv safety)
 node --test tests/dsh-client-bundle-test.mjs   # 5 checks: card bundle contract + jsdom render smoke
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 checks: pi extension (mock pi)
+(cd packages/mcp && npm install && npm test)   # 17 checks: MCP form (SDK stdio client end-to-end + tool/output parity with the DSH plugin + stdout purity)
 node --test tests/three-forms.test.mjs   # 5 checks: all three forms read/write the same bundle consistently
 ```
 

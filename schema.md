@@ -139,4 +139,4 @@ OKF v0.2 合规 = 全部满足：
 
 ## 7. 目录规则（AGENTS.md）
 
-对任意目录 D 或 concept 所在目录，生效规则 = 从 D 向上遍历到 bundle 根**取最近的 `AGENTS.md`**；存在多条时**逐级叠加、子目录覆盖父目录**（最近优先）。core 的 `resolveRules(dir)` 返回从根到叶的有序规则列表，三形态共用。规则正文可含门控约定（如「`Attested Computation` 写入前需 human 确认」），写入门控按它执行。
+对任意目录 D 或 concept 所在目录，生效规则 = 从 D 向上遍历到 bundle 根**取最近的 `AGENTS.md`**；存在多条时**逐级叠加、子目录覆盖父目录**（最近优先）。core 的 `resolveRules(dir)` 返回从根到叶的有序规则列表，四形态共用。规则正文可含门控约定（如「`Attested Computation` 写入前需 human 确认」），写入门控按它执行。

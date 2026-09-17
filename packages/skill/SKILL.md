@@ -29,6 +29,11 @@ metadata:
 > CLI 位置：`wiki`（在 PATH 中时直接用；装法见 `~/.agents/skills/wiki/scripts/install.sh`）。
 > 若宿主报 `command not found`（GUI 应用的 PATH 常不含 /usr/local/bin），
 > 改用绝对路径调用：`node "$HOME/.agents/skills/wiki/scripts/wiki.mjs" <子命令>`。
+>
+> **宿主已装 llm-wiki MCP 服务端时优先用它**（`@sidleo3/mcp-wiki`，见 `packages/mcp/README.md`）：
+> 同样 14 个 `wiki_*` 工具（同名/同参/同输出），少一次「先加载 SKILL.md 再拼 shell」的往返，
+> 写入不必走临时文件与引号转义，规则还会经 MCP `instructions` 在连接时下发。
+> 本 Skill 是无 MCP 宿主 / 未装 MCP 时的兜底。
 
 ## 0. 主动使用条款（本 skill 的核心价值）
 
@@ -51,7 +56,7 @@ metadata:
 宿主是否加载、加载后会不会真去查库，不由我们决定。跑 `wiki prompt` 拿到一段可直接粘贴的
 「宿主常驻要求」，写进**宿主自己的**「自定义指令 / 系统提示词 / 项目 AGENTS.md」——
 相当于替这个宿主补上每轮注入（你有文件权限就直接写，没有就让用户粘贴）。
-换任何新宿主都是同一招；DSH 插件与 pi 扩展已自动注入，不需要。详见 `wiki help prompt`。
+换任何新宿主都是同一招；DSH 插件、pi 扩展与 MCP 形态会自动下发（MCP 经 `instructions`，见 packages/mcp/README.md），不需要。详见 `wiki help prompt`。
 
 ## 1. 何时使用本 Skill
 

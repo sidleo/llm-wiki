@@ -11,8 +11,8 @@ AGENTS.md / APPEND_SYSTEM_PROMPT.md 规则解析（向上遍历）、
 飞书云盘在线库后端（feishuStatus/feishuSync/feishuPull/feishuPush/feishuInit：经 lark-cli 把云盘文件夹
 当作原生 .md bundle 读写；三方状态 .wiki-cloud.json、只推改动文件、永不删两端、冲突停下报清单）。
 
-被三形态复用：DSH 插件 `@sidleo3/dsh-wiki`、pi 扩展 `@sidleo3/pi-wiki`、skill CLI `wiki`
-（后两者内嵌 vendor-core 自包含，本包供仓库开发态/自定义集成引用）。
+被四形态复用：DSH 插件 `@sidleo3/dsh-wiki`、pi 扩展 `@sidleo3/pi-wiki`、MCP 服务端 `@sidleo3/mcp-wiki`、skill CLI `wiki`
+（后三者内嵌 vendor-core 自包含，本包供仓库开发态/自定义集成引用）。
 
 ```js
 import { validateBundle, buildGraph, searchGraph, gitStatus, gitSync } from '@sidleo3/llm-wiki-core'

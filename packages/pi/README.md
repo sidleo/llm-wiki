@@ -1,8 +1,8 @@
 # @sidleo3/pi-wiki — Pi 的 llm-wiki 知识库扩展
 
 为 [Pi](https://github.com/earendil-works/pi)（AI coding agent）提供 llm-wiki 通用知识库访问：
-**内嵌 vendor-core，与 DSH 插件 `@sidleo3/dsh-wiki` / skill CLI 完全相同的实现**，读写同一份
-OKF v0.2 bundle（默认 `~/.agents/wiki`），一套数据三处共享、无重复维护。
+**内嵌 vendor-core，与 DSH 插件 `@sidleo3/dsh-wiki` / MCP 服务端 `@sidleo3/mcp-wiki` / skill CLI 完全相同的实现**，读写同一份
+OKF v0.2 bundle（默认 `~/.agents/wiki`），一套数据四处共享、无重复维护。
 
 ## 能力
 

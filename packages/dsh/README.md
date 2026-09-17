@@ -1,7 +1,7 @@
 # dsh-wiki — DSH 插件（llm-wiki 知识库）
 
 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 提供的
-llm-wiki 通用知识库插件：**内嵌 vendor-core，与 pi 扩展 / skill CLI 同一实现**（`packages/dsh/scripts/sync-vendor.mjs` 从 `packages/core` 同步），
+llm-wiki 通用知识库插件：**内嵌 vendor-core，与 pi 扩展 / MCP 服务端 / skill CLI 同一实现**（`packages/dsh/scripts/sync-vendor.mjs` 从 `packages/core` 同步），
 读写同一份 OKF v0.2 bundle（默认 `~/.agents/wiki`）。
 
 ## 安装

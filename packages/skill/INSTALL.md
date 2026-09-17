@@ -4,6 +4,10 @@ skill 版 = `SKILL.md` 说明 + `wiki` CLI，任何支持 Agent Skills 的宿主
 （Claude Code / Codex / Cursor / DSH / pi / Workbuddy 等）都能通过读取同一份
 `SKILL.md` 并使用同一份数据 bundle。
 
+> **宿主支持 MCP 时优先装 MCP 版**（`@sidleo3/mcp-wiki`，见 `packages/mcp/README.md`）：
+> 同样是 14 个 `wiki_*` 工具（同名/同参/同输出），但少一次「先加载 SKILL.md 再拼 shell」的往返、
+> 写入不必走临时文件转义，且工具调用在宿主审批界面里可见。本 skill 版作为无 MCP 宿主或未装 MCP 时的兜底。
+
 ## 方式 A：自包含打包（推荐，零外部依赖）
 
 生成一个可整体复制进任意宿主 skills 目录的自包含目录（含 CLI + 全部 core）：
