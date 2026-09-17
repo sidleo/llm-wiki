@@ -1,6 +1,6 @@
 {
   "name": "@sidleo3/dsh-wiki",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "description": "DSH plugin for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle with progressive disclosure. Registers 14 tools: wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules/help/dirs/use/sync. Named multi-bundle directories with session/global switching, Git remote sync + Feishu cloud-drive online knowledge base (native .md), and a Settings → Plugins → Plugin configuration card (bundle registry / runtime params / sync / health). Self-contained (vendor-core embedded).",
   "type": "module",
   "main": "wiki.mjs",
