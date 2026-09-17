@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 
 /** 包版本（写入门控的 producer 版本；与 package.json 保持一致，见 test/parity）。 */
-export const MCP_VERSION = '0.4.11'
+export const MCP_VERSION = '0.4.13'
 
 /** 写入记录里的 producer 标识（区分四形态）。 */
 export const PRODUCER = 'mcp-wiki'

@@ -18,6 +18,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 import { BIN, CLI, DEMO, TOOL_NAMES, waitFor } from './helpers.mjs'
+import { MCP_VERSION } from '../lib/config.mjs'
 
 const APPEND_TEXT = '# 表规则\n\n用前先 DESCRIBE 核对线上结构。\n'
 const GATE_AGENTS = '# 测试库规则\n\n## 门控\n- 需 human 确认: Metric\n'
@@ -122,7 +123,7 @@ describe('MCP server 端到端（stdio）', () => {
     const r = await call('wiki_create', { path: 'tables/mcp-probe-test', type: 'Table', body: '# Schema\n\n| a |\n|---|\n' })
     assert.match(r.text, /已创建 tables\/mcp-probe-test/)
     const written = await readFile(join(tmp, 'tables', 'mcp-probe-test.md'), 'utf8')
-    assert.match(written, /agent:mcp-wiki\/0\.4\.11/)
+    assert.match(written, new RegExp(`agent:mcp-wiki/${MCP_VERSION.replace(/\./g, '\\.')}`))
     assert.doesNotMatch(written, /verified/)
   })
 
