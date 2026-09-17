@@ -43,7 +43,7 @@ export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
 /** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.4.14'
+const PLUGIN_VERSION = '0.4.15'
 
 /** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
 const SETTINGS_NS = 'dsh-wiki'
@@ -90,8 +90,9 @@ const CONTEXT_NAME = 'wiki-registry:bundle'
  */
 const SECTION_TEXT = [
   '## 通用知识库（llm-wiki · OKF v0.2）',
-  '> 目录自由分层（表/口径计算/坑点/指标…靠 type 区分），概念间用真实链接交叉引用。',
+  '> 收录反复要用到的知识：事实与结构、约定与口径、流程与规范、经验与坑点；目录自由分层（type 由各库自定），概念间用真实链接交叉引用。',
   '> 【硬要求】涉及知识检索/写入的第一步：先 `wiki_list` 看全貌（渐进披露），再决定下一步——不要凭印象直接搜或写。',
+  '> 【何时必须查库】要引用既有事实或结构（字段/接口/清单/术语表）、要遵守既有约定或口径（算法/命名/流程/权限）、动手前有既有做法与红线、出现对不上或不一致要排查、或用户说「按我们的规定」「上次那个坑」时——先查库再回答。',
   '- 步骤1 wiki_list — 目录树 + 概念清单（type/title/id）',
   '- 步骤2 wiki_search — 关键词检索（匹配 frontmatter + 正文）',
   '- 步骤3 wiki_get — 读取单个概念完整正文（自动附 backlinks：引用它的坑点/概念）',
@@ -822,7 +823,7 @@ export function apply(ctx, config) {
         const dataDir = (await resolveActive(exec && exec.agent)).path
         const graph = await c.buildGraph(dataDir)
         const res = c.searchGraph(graph, q, { type: args.type, tag: args.tag, limit: Number(args.limit) || 20 })
-        if (!res.length) return { text: '无匹配。若你正在用的表/知识确实不在库中：这是主动记录信号——探查其结构后用 wiki_create 建概念（Table 自动记录无需确认；新口径展示给用户确认后建 Metric/Attested Computation）。也可 wiki_list 看全貌或 wiki_lint 看缺失清单。' }
+        if (!res.length) return { text: '无匹配。若你正在用的知识确实不在库中，这是主动记录信号——用 wiki_create 建概念（探查类事实可直接记；口径/约定类先向用户展示确认）。也可 wiki_list 看全貌或 wiki_lint 看缺失清单。' }
         const lines = res.map((r) => `${r.strong ? '★' : ''}${r.type}: ${r.title}  (${r.id})\n    ${r.description || ''}`)
         return { text: lines.join('\n').slice(0, effectiveConfig().maxGetChars) }
       } catch (e) { return strErr(e) }
@@ -844,7 +845,7 @@ export function apply(ctx, config) {
         const c = await loadCore()
         const dataDir = (await resolveActive(exec && exec.agent)).path
         const got = await c.getConcept(dataDir, args.id)
-        if (!got) return { text: `未找到: ${args.id}。若这是你工作中遇到的真实表/概念，可用 wiki_create 主动补录（探查事实自动记录）。或 wiki_list 看全貌。` }
+        if (!got) return { text: `未找到: ${args.id}。若这是你工作中真实存在的概念，可用 wiki_create 主动补录（探查类事实可直接记）。或 wiki_list 看全貌。` }
         if (got.ambiguous) return { text: `标题「${args.id}」有多个候选: ${got.candidates.join(', ')}。请用完整 id。` }
         const lines = [
           `# ${got.title}  (${got.id})`,
@@ -876,7 +877,7 @@ export function apply(ctx, config) {
       type: 'object',
       additionalProperties: false,
       properties: {
-        path: { type: 'string', description: 'Concept ID（bundle 相对路径，不含 .md，如 tables/orders 或 口径/销售额）' },
+        path: { type: 'string', description: 'Concept ID（bundle 相对路径，不含 .md，如 tables/orders 或 术语表/发布流程）' },
         type: { type: 'string', description: 'OKF type，必填（Table / Attested Computation / Pitfall / Reference / Metric / Playbook…）' },
         title: { type: 'string', description: '显示名，缺省用文件名' },
         description: { type: 'string', description: '一句话摘要' },

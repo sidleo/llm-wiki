@@ -121,11 +121,23 @@ describe('规则到达通道（core + skill CLI）', () => {
     const out = cli(['prompt'], bundle)
     assert.match(out, /自定义指令/, '带粘贴位置说明')
     assert.match(out, /先查库再回答/, '要求先查库')
-    assert.match(out, /不要凭记忆回答表结构与口径/, '禁止凭记忆')
+    assert.match(out, /不要凭记忆回答库里有的事实与口径/, '禁止凭记忆')
     assert.match(out, /wiki rules/, '指明规则载入入口')
     assert.match(out, /--confirmed/, '写明门控确认方式')
     assert.match(out, /scripts\/wiki\.mjs/, 'GUI 宿主 PATH 兜底')
     assert.match(out, /wiki dirs/, '多库提示')
+    // 通用性：文案只说「知识的类型」，不假设库的领域（领域触发条件属于 APPEND 数据）
+    assert.doesNotMatch(out, /表结构/, '默认 CLI 文案不应绑死数据库领域')
+    assert.match(out, /APPEND_SYSTEM_PROMPT\.md/, '指明领域规则在库里')
+  })
+
+  test('CLI `wiki prompt --mcp` 输出 MCP 形态文案（工具名 + 触发条件）', () => {
+    const out = cli(['prompt', '--mcp'], bundle)
+    assert.match(out, /MCP 形态/)
+    assert.match(out, /wiki_search/, '说 MCP 工具名')
+    assert.match(out, /何时必须查库/, '带触发条件')
+    assert.doesNotMatch(out, /wiki rules\b/, 'MCP 文案不应引导去 bash 调 CLI')
+    assert.match(cli(['prompt', '--raw', '--mcp'], bundle), /^【llm-wiki 知识库使用要求（MCP 形态）】/)
   })
 
   test('CLI `wiki prompt --raw` 只输出正文；--full 追加同步条款', () => {

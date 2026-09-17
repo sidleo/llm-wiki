@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 扩展版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const PI_VERSION = "0.4.14";
+const PI_VERSION = "0.4.15";
 
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;
@@ -34,7 +34,8 @@ function loadCore(): Promise<any> {
 }
 
 const WIKI_GUIDELINES = [
-  "llm-wiki 知识库（OKF v0.2）：概念 = frontmatter(type 必填)+正文的 .md 文件，目录自由分层，真实链接交叉引用；index.md/log.md/AGENTS.md 是保留文件。",
+  "llm-wiki 知识库（OKF v0.2）：概念 = frontmatter(type 必填)+正文的 .md 文件，收录反复要用到的知识（事实与结构、约定与口径、流程与规范、经验与坑点），目录自由分层，真实链接交叉引用；index.md/log.md/AGENTS.md 是保留文件。",
+  "【何时必须查库】要引用既有事实或结构（字段/接口/清单/术语表）、要遵守既有约定或口径（算法/命名/流程/权限）、动手前有既有做法与红线、出现对不上或不一致要排查，或用户说「按我们的规定」「上次那个坑」时——先查库再回答，别凭记忆。",
   "做知识相关工作第一步先 wiki_list 看全貌（渐进披露），再 wiki_search / wiki_get 按需取明细。",
   "wiki_get 自动附 backlinks（引用它的概念/坑点）。写入前先 wiki_rules <目录> 看 AGENTS.md 门控。",
   "各分类目录 APPEND_SYSTEM_PROMPT.md 的正文每回合已注入 system prompt（【知识库自定义规则】段），照做；要复查或看某目录单独规则用 wiki_rules。",
@@ -114,7 +115,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
         const dataDir = await resolveDir();
         const graph = await core.buildGraph(dataDir);
         const res = core.searchGraph(graph, q, { type: params.type, tag: params.tag, limit: params.limit || 20 });
-        if (!res.length) return ok("无匹配。若这是工作中遇到的真实表/知识：可用 wiki_create 主动补录（探查事实自动记录；新口径先与用户确认）。或 wiki_list 看全貌 / wiki_lint 看缺失。");
+        if (!res.length) return ok("无匹配。若这是工作中真实存在的知识：可用 wiki_create 主动补录（探查类事实可直接记；口径/约定类先与用户确认）。或 wiki_list 看全貌 / wiki_lint 看缺失。");
         return ok(res.map((r: any) => `${r.strong ? "★" : ""}${r.type}: ${r.title}  (${r.id})\n    ${r.description || ""}`).join("\n"));
       } catch (e) {
         return err(e);
@@ -135,7 +136,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
         const core = await loadCore();
         const dataDir = await resolveDir();
         const got = await core.getConcept(dataDir, params.id);
-        if (!got) return ok(`未找到: ${params.id}。若这是真实表/概念可用 wiki_create 主动补录。或 wiki_list 看全貌。`);
+        if (!got) return ok(`未找到: ${params.id}。若这是工作中真实存在的概念，可用 wiki_create 主动补录（探查类事实可直接记）。或 wiki_list 看全貌。`);
         if (got.ambiguous) return ok(`标题「${params.id}」有多个候选: ${got.candidates.join(", ")}。请用完整 id。`);
         const lines = [
           `# ${got.title}  (${got.id})`,

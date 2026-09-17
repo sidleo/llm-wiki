@@ -21,10 +21,14 @@ import { formatFeishuResult, formatGitResult } from './format.mjs'
  * 为什么 dsh/pi 不需要而 MCP 需要：那两个宿主每轮把引导注入 system prompt，
  * 触发条件必然到达 agent；MCP 只有 initialize 的 instructions，而**不少宿主只把
  * 工具列表交给模型、并不读 instructions**——那时 agent 唯一的线索就是工具描述。
- * 把触发条件放描述首行，「用户问口径 → agent 主动调 wiki」才成立。
+ * 把触发条件放描述首行，「用户该查库时 agent 主动调 wiki」才成立。
+ *
+ * 【通用性】只按「知识的类型」描述触发条件，不假设库的领域：具体到某个领域
+ * （表结构/取数口径/接口约定/审批流程…）的触发条件属于**数据**，写在 bundle 的
+ * APPEND_SYSTEM_PROMPT.md 里，随库分发，不写进仓库文案。
  */
 const WHEN_TO_USE =
-  '【何时用】用户问到某张表/字段/表结构、指标怎么算或口径是什么、该从哪张表取数、要写或改 SQL、数据对不上或口径不一致、某张表有什么坑 —— 必须先调用本工具查库，不要凭记忆回答。'
+  '【何时用】要引用既有事实或结构、要遵守既有约定或口径、动手前有既有做法与红线、出现对不上或不一致要排查，或用户提到「按我们的规定」「上次那个坑」时 —— 必须先调用本工具查库，不要凭记忆回答。'
 
 function strErr(e) {
   return { text: `错误：${e && e.message ? e.message : String(e)}` }
@@ -159,7 +163,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
         const dataDir = (await resolveActive()).path
         const graph = await core.buildGraph(dataDir)
         const res = core.searchGraph(graph, q, { type: args.type, tag: args.tag, limit: Number(args.limit) || 20 })
-        if (!res.length) return { text: '无匹配。若你正在用的表/知识确实不在库中：这是主动记录信号——探查其结构后用 wiki_create 建概念（Table 自动记录无需确认；新口径展示给用户确认后建 Metric/Attested Computation）。也可 wiki_list 看全貌或 wiki_lint 看缺失清单。' }
+        if (!res.length) return { text: '无匹配。若你正在用的知识确实不在库中，这是主动记录信号——用 wiki_create 建概念（探查类事实可直接记；口径/约定类先向用户展示确认）。也可 wiki_list 看全貌或 wiki_lint 看缺失清单。' }
         const lines = res.map((r) => `${r.strong ? '★' : ''}${r.type}: ${r.title}  (${r.id})\n    ${r.description || ''}`)
         return { text: lines.join('\n').slice(0, limits.maxGetChars) }
       } catch (e) { return strErr(e) }
@@ -179,7 +183,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
       try {
         const dataDir = (await resolveActive()).path
         const got = await core.getConcept(dataDir, args.id)
-        if (!got) return { text: `未找到: ${args.id}。若这是你工作中遇到的真实表/概念，可用 wiki_create 主动补录（探查事实自动记录）。或 wiki_list 看全貌。` }
+        if (!got) return { text: `未找到: ${args.id}。若这是你工作中真实存在的概念，可用 wiki_create 主动补录（探查类事实可直接记）。或 wiki_list 看全貌。` }
         if (got.ambiguous) return { text: `标题「${args.id}」有多个候选: ${got.candidates.join(', ')}。请用完整 id。` }
         const lines = [
           `# ${got.title}  (${got.id})`,
@@ -211,7 +215,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
       type: 'object',
       additionalProperties: false,
       properties: {
-        path: { type: 'string', description: 'Concept ID（bundle 相对路径，不含 .md，如 tables/orders 或 口径/销售额）' },
+        path: { type: 'string', description: 'Concept ID（bundle 相对路径，不含 .md，如 tables/orders 或 术语表/发布流程）' },
         type: { type: 'string', description: 'OKF type，必填（Table / Attested Computation / Pitfall / Reference / Metric / Playbook…）' },
         title: { type: 'string', description: '显示名，缺省用文件名' },
         description: { type: 'string', description: '一句话摘要' },

@@ -52,7 +52,7 @@ async function loadCore() {
 }
 
 /** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const CLI_VERSION = '0.4.14'
+const CLI_VERSION = '0.4.15'
 
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
