@@ -43,7 +43,7 @@ export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
 /** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.6.0'
+const PLUGIN_VERSION = '0.6.2'
 
 /** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
 const SETTINGS_NS = 'dsh-wiki'
@@ -258,6 +258,12 @@ function formatGitResult(action, r) {
  * 注册 /api/dsh-wiki/* 路由（webServer 可选接入；非 web 部署不注册，插件照常工作）。
  * 卡片（lib/client.js）只跟这些端点对话：命名 bundle 管理 / 参数 / 体检 / index / 在线同步。
  */
+/** index.md / log.md 是派生文件（重生成 / 取并集），永不当作需要人工处理的冲突。 */
+function isDerivedFile(rel) {
+  const base = String(rel || '').split('/').pop()
+  return base === 'index.md' || base === 'log.md'
+}
+
 function registerWebRoutes(ctx, deps) {
   const { effectiveConfig, loadCore, invalidateCaches, autosync } = deps
   const webServer = ctx.get('webServer')
@@ -410,10 +416,11 @@ function registerWebRoutes(ctx, deps) {
         }
         // 旧缓存还有未上线/冲突的改动 → 先同步，否则换目录会把它们留在旧缓存
         const st = await c.feishuStatus(prev)
-        if (st.ok && (st.push.length || st.conflict.length)) {
+        const stRealConflicts = st.ok ? st.conflict.filter((x) => !isDerivedFile(x.rel)) : []
+        if (st.ok && (st.push.length || stRealConflicts.length)) {
           return jsonResponse(res, {
             ok: false,
-            error: `当前缓存还有 ${st.push.length} 个待推送 / ${st.conflict.length} 个冲突：先「一键同步」或处理冲突再换目录${st.conflict.length ? `（冲突：${st.conflict.map((x) => x.rel).join('、')}）` : ''}`,
+            error: `当前缓存还有 ${st.push.length} 个待推送 / ${stRealConflicts.length} 个冲突：先「一键同步」或处理冲突再换目录${stRealConflicts.length ? `（冲突：${stRealConflicts.map((x) => x.rel).join('、')}）` : ''}`,
           }, 400)
         }
         await c.writeRegistry({ bundles: { [name]: { ...reg.bundles[name], cacheDir: nextDir } } })
@@ -569,8 +576,15 @@ function registerWebRoutes(ctx, deps) {
         if (op === 'push') {
           const before = await c.feishuStatus(t, { identity })
           if (!before.ok) return jsonResponse(res, before, 400)
-          if (before.conflict.length) {
-            return jsonResponse(res, { ok: false, step: 'conflict', conflicts: before.conflict.map((x) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: '请先人工处理冲突（飞书或本地任选一侧）再重跑。' }, 409)
+          const realConflicts = before.conflict.filter((x) => !isDerivedFile(x.rel))
+          if (realConflicts.length) {
+            return jsonResponse(res, { ok: false, step: 'conflict', conflicts: realConflicts.map((x) => x.rel), error: `${realConflicts.length} 个文件两侧都改过`, next: '请先人工处理冲突（飞书或本地任选一侧）再重跑。' }, 409)
+          }
+          if (before.conflict.some((x) => isDerivedFile(x.rel))) {
+            // 只有派生文件冲突（如 index 计数差异）→ 走完整 sync 收尾（重生成 + 推送）
+            const r = await c.feishuSync(t, { identity })
+            invalidateCaches()
+            return jsonResponse(res, { ...r, bundle: t }, r.ok ? 200 : 409)
           }
           const r = await c.feishuPush(t, { paths: before.push.map((x) => x.rel), identity })
           invalidateCaches()

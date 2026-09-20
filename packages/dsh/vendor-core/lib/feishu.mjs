@@ -334,6 +334,24 @@ function duplicateGuard(remote) {
 }
 
 /**
+ * 「双侧都变」时裁决内容是否真的分叉（只在冲突候选上调用，故额外一次 fetch 可接受）。
+ * @returns {Promise<true|false|null>} true=内容相同（不算冲突）；false=确实不同；null=读不到，无法判定
+ */
+async function sameContent(s, rel, rf, opts, id) {
+  if (!rf || !rf.fileToken) return null
+  const localText = await readFile(join(s.cacheDir, rel), 'utf8').catch(() => null)
+  if (localText === null) return null
+  const r = unwrap(await runLark(['markdown', '+fetch', '--file-token', rf.fileToken, '--format', 'json', ...((id && id.as) || [])], opts))
+  if (!r.ok || !r.data || typeof r.data.content !== 'string') return null
+  return normalizeText(r.data.content) === normalizeText(localText)
+}
+
+/** 比较内容前的归一化：统一换行符与行尾空白，避免平台差异造成假冲突。 */
+function normalizeText(t) {
+  return String(t).replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n+$/, '\n')
+}
+
+/**
  * 三方差异（不写任何一侧）。
  * @returns {Promise<{ok:boolean, push?:object[], pull?:object[], conflict?:object[], remoteDeleted?:string[], counts?:object, ignored?:string[], error?:string, next?:string}>}
  */
@@ -342,6 +360,8 @@ export async function feishuStatus(spec, opts = {}) {
   if (!s.cacheDir) return { ok: false, error: '缺少 cacheDir（飞书 bundle 的本地工作目录）', next: '注册 bundle 时给 cacheDir，或用默认 ~/.agents/wiki-cloud/<名字>。' }
   await mkdir(s.cacheDir, { recursive: true })
   const idx = await readIndex(s.cacheDir)
+  // 身份：只在需要比对内容（双侧都变）时才会真正用到，这里先解析好备用
+  const id = await resolveLarkIdentity(opts).catch(() => null)
   const remote = await feishuListRemote(s, opts)
   if (!remote.ok) return remote
   const dup = duplicateGuard(remote)
@@ -368,8 +388,17 @@ export async function feishuStatus(spec, opts = {}) {
     }
     const localChanged = rec.localMtimeMs !== lf.mtimeMs || rec.localSize !== lf.size
     const remoteChanged = rec.remoteModified !== rf.modifiedTime
-    if (localChanged && remoteChanged) conflict.push({ rel, fileToken: rf.fileToken })
-    else if (localChanged) push.push({ rel, fileToken: rf.fileToken })
+    if (localChanged && remoteChanged) {
+      // 双侧「都变了」不等于内容真的分叉：另一台机器把**同样的内容**重推一次，
+      // 会让远端 modified_time 变新；本机随后拉取又会让本地 mtime/size 变新，
+      // 于是账本两侧都不匹配 → 假冲突（5 楼实测 4 个文件两侧逐字节相同却被判冲突，
+      // 定时同步因此每 5 分钟失败一次、永远同步不了）。
+      // 这里只在「双侧都变」这条路径上多拉一次远端内容做裁决：相同则不算改动。
+      const same = await sameContent(s, rel, rf, opts, id)
+      if (same === true) continue // 内容一致 → 视为无变化（账本在 pull/push 后自会刷新）
+      if (same === null) conflict.push({ rel, fileToken: rf.fileToken, unverified: true })
+      else conflict.push({ rel, fileToken: rf.fileToken })
+    } else if (localChanged) push.push({ rel, fileToken: rf.fileToken })
     else if (remoteChanged) pull.push({ rel, fileToken: rf.fileToken, modifiedTime: rf.modifiedTime })
   }
   for (const [rel, rf] of remote.files) {
@@ -566,8 +595,12 @@ export async function feishuSync(spec, opts = {}) {
   const before = await feishuStatus(s, opts)
   if (!before.ok) return before
 
-  const conceptConflicts = before.conflict.filter((c) => c.rel !== 'log.md')
-  const logConflict = before.conflict.find((c) => c.rel === 'log.md')
+  // 派生文件永不阻塞：index.md 一律按本地目录树重生成，log.md 取并集。
+  // 它们由 core 自己生成/追加，**不是**人工撰写的知识——两侧都变只说明两台机器各自
+  // 重生成过（内容差异通常只是概念计数），当冲突会让同步永久停摆（5 楼实测踩到）。
+  const derived = (rel) => basename(rel) === 'index.md' || basename(rel) === 'log.md'
+  const conceptConflicts = before.conflict.filter((c) => !derived(c.rel))
+  const logConflict = before.conflict.find((c) => basename(c.rel) === 'log.md')
   if (conceptConflicts.length) {
     return {
       ok: false,
@@ -582,8 +615,11 @@ export async function feishuSync(spec, opts = {}) {
   const steps = []
   const pushList = before.push.map((x) => x.rel)
 
-  // 派生文件：index.md 一旦要推，就按本地目录树先重生成（重新生成的结果严格正确）
-  if (pushList.some((r) => basename(r) === 'index.md')) {
+  // 派生文件：index.md 需要推、或本身被判为「两侧都改」时，都按本地目录树重生成。
+  // 注意「两侧都改」的 index 不在 push 也不在 pull 里（它是派生文件、已从冲突中豁免），
+  // 只判 push 会漏掉——那样重生成的结果永远不会上线，远端 index 停在旧内容。
+  const indexInvolved = pushList.some((r) => basename(r) === 'index.md') || before.conflict.some((c) => basename(c.rel) === 'index.md')
+  if (indexInvolved) {
     const regenerated = await refreshIndex(s.cacheDir)
     steps.push(`重生成 index：${regenerated.files.length} 个`)
     const local = await scanLocal(s.cacheDir)
@@ -737,10 +773,18 @@ export async function feishuFlush(root, config = {}, opts = {}) {
   if (!spec) return null
   const st = await feishuStatus(spec)
   if (!st.ok) return { ok: false, step: 'status', error: st.error, next: st.next, bundle: spec }
-  if (st.conflict.length) {
-    return { ok: false, step: 'conflict', conflicts: st.conflict.map((c) => c.rel), error: `${st.conflict.length} 个文件两侧都改过（本次改动已在本地缓存，未上线）`, next: '先处理冲突再 wiki_sync。', bundle: spec }
+  // 只有「人工撰写的知识」两侧都改才拦；index.md / log.md 是派生文件（重生成 / 取并集），
+  // 拦它们会让一次陈旧的 index 计数差异永久挡住后续所有写入上线。
+  const realConflicts = st.conflict.filter((c) => basename(c.rel) !== 'index.md' && basename(c.rel) !== 'log.md')
+  if (realConflicts.length) {
+    return { ok: false, step: 'conflict', conflicts: realConflicts.map((c) => c.rel), error: `${realConflicts.length} 个文件两侧都改过（本次改动已在本地缓存，未上线）`, next: '先处理冲突再 wiki_sync。', bundle: spec }
   }
-  if (!st.push.length) return { ok: true, pushed: [], created: [], bundle: spec, nothingToPush: true }
+  if (!st.push.length) {
+    // 没有新改动时，派生文件仍可能等着重生成（例如远端 index 是旧的）→ 交给 feishuSync 收尾
+    if (!st.conflict.length) return { ok: true, pushed: [], created: [], bundle: spec, nothingToPush: true }
+    const r = await feishuSync(spec, opts)
+    return { ...r, bundle: spec, files: [] }
+  }
   const r = await feishuPush(spec, { ...opts, paths: st.push.map((x) => x.rel) })
   return { ...r, bundle: spec, files: st.push.map((x) => x.rel) }
 }

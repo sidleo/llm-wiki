@@ -106,6 +106,7 @@ describe('DSH 插件配置卡片（宿主半）', () => {
   let demo
   let regFile
   let prevRegEnv
+  let prevAutoEnv
   let mock
   let routes
   const route = (path) => routes.get(path)
@@ -118,6 +119,9 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     prevRegEnv = process.env.WIKI_REGISTRY_FILE
     regFile = join(tmp, 'registry.json')
     process.env.WIKI_REGISTRY_FILE = regFile
+    // 定时同步设置也必须隔离：否则本用例会往真实 ~/.agents/wiki-autosync.json 里写 demo 条目
+    prevAutoEnv = process.env.WIKI_AUTOSYNC_FILE
+    process.env.WIKI_AUTOSYNC_FILE = join(tmp, 'autosync.json')
 
     mock = makeCtx()
     routes = mock.routes
@@ -128,6 +132,8 @@ describe('DSH 插件配置卡片（宿主半）', () => {
   after(async () => {
     if (prevRegEnv === undefined) delete process.env.WIKI_REGISTRY_FILE
     else process.env.WIKI_REGISTRY_FILE = prevRegEnv
+    if (prevAutoEnv === undefined) delete process.env.WIKI_AUTOSYNC_FILE
+    else process.env.WIKI_AUTOSYNC_FILE = prevAutoEnv
     await rm(tmp, { recursive: true, force: true })
   })
 

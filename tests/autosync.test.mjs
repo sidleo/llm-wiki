@@ -177,6 +177,12 @@ describe('定时自动同步调度器（DSH 插件）', () => {
   })
 
   after(async () => {
+    // 必须还原环境：WIKI_AUTOSYNC_FILE 若不还原，会残留本用例的临时路径，
+    // 甚至让别的用例把条目写进真实 ~/.agents/wiki-autosync.json（曾把 demo 泄漏进去）。
+    for (const [k, v] of Object.entries(prevEnv || {})) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
     await rm(tmp, { recursive: true, force: true })
   })
 
@@ -263,6 +269,54 @@ describe('定时自动同步调度器（DSH 插件）', () => {
     const s = await core.autosyncSettingsFor('云库')
     assert.equal(s.lastResult.ok, false)
     assert.equal(s.lastResult.conflicts, 1)
+  })
+
+  test('派生文件（index.md）双侧都改时不阻塞定时同步——5 楼实测回归', async () => {
+    // 两台机器各自重生成 index.md（内容只是概念计数不同），曾被判为冲突 →
+    // 定时同步每 5 分钟失败一次、永远同步不了。index.md 是派生文件，必须重生成而非阻塞。
+    const auto = await controller()
+    await core.refreshIndex(cacheDir)
+    await core.setAutosyncSettings('云库', { enabled: true, intervalMinutes: 5, identity: 'auto' })
+    await auto.tick()
+    assert.equal((await core.autosyncSettingsFor('云库')).lastResult.ok, true, '基线同步应成功')
+
+    // 两侧都动 index.md
+    await core.refreshIndex(cacheDir)
+    const st = JSON.parse(await readFile(process.env.FAKE_LARK_STATE, 'utf8'))
+    assert.ok(st.files['index.md'], '基线后远端应有 index.md')
+    st.files['index.md'].content = '# Knowledge Bundle\n\n（远端自己的一份）\n'
+    st.files['index.md'].modified += 5000
+    await writeFile(process.env.FAKE_LARK_STATE, JSON.stringify(st))
+
+    auto.stop()
+    const auto2 = await controller()
+    await auto2.tick()
+    const s2 = await core.autosyncSettingsFor('云库')
+    assert.equal(s2.lastResult.ok, true, `index.md 不该阻塞定时同步：${JSON.stringify(s2.lastResult)}`)
+    assert.equal(s2.lastResult.conflicts, 0)
+  })
+
+  test('真冲突（概念文件两侧都改）仍然阻塞定时同步——豁免只给派生文件', async () => {
+    const auto = await controller()
+    await core.setAutosyncSettings('云库', { enabled: true, intervalMinutes: 5, identity: 'auto' })
+    await auto.tick()
+    // 远端改概念文件 + 本地也改 → 真冲突
+    const st = JSON.parse(await readFile(process.env.FAKE_LARK_STATE, 'utf8'))
+    st.files['tables/orders.md'].content = '# 远端版\n'
+    st.files['tables/orders.md'].modified += 5000
+    await writeFile(process.env.FAKE_LARK_STATE, JSON.stringify(st))
+    await writeFile(join(cacheDir, 'tables/orders.md'), '# 本地版\n')
+
+    auto.stop()
+    const auto2 = await controller()
+    await auto2.tick()
+    const s2 = await core.autosyncSettingsFor('云库')
+    assert.equal(s2.lastResult.ok, false, '真冲突必须停下报告')
+    assert.equal(s2.lastResult.conflicts, 1)
+    // 两侧内容都不许被覆盖
+    assert.equal(await readFile(join(cacheDir, 'tables/orders.md'), 'utf8'), '# 本地版\n')
+    const after = JSON.parse(await readFile(process.env.FAKE_LARK_STATE, 'utf8'))
+    assert.equal(after.files['tables/orders.md'].content, '# 远端版\n')
   })
 
   test('runNow 对未注册的 bundle 明确报错（不静默当作无事发生）', async () => {

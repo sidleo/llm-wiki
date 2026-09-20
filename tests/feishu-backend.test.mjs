@@ -244,6 +244,74 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
     assert.ok(st.files['tables/new_one.md'], '新概念应上传')
   })
 
+  test('内容相同的「双侧都改」不算冲突（另一台机器重推同样内容造成的假冲突）', async () => {
+    // 真实场景（5 楼实测）：Mac 把同样内容重推一次 → 远端 modified_time 变新；
+    // 5 楼拉取后本地 mtime/size 也变 → 账本两侧都不匹配 → 假冲突，定时同步永久失败。
+    // 判据只看 mtime/size，所以必须再比一次内容才能裁决。
+    await writeLocal('a.md', '---\ntype: Reference\ntitle: A\n---\n\n相同内容\n')
+    assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)
+
+    // 远端「被重推」：内容一字不改，只动 modified_time
+    const st = await readState(stateFile)
+    st.files['a.md'].modified += 5000
+    await writeFile(stateFile, JSON.stringify(st))
+    // 本地也「变了」：只动 mtime（内容不变）
+    await writeLocal('a.md', '---\ntype: Reference\ntitle: A\n---\n\n相同内容\n')
+
+    const before = await core.feishuStatus(spec())
+    assert.deepEqual(before.conflict, [], `内容相同不该判冲突：${JSON.stringify(before.conflict)}`)
+    assert.deepEqual(before.push, [], '内容相同不该推')
+    assert.deepEqual(before.pull, [], '内容相同不该拉')
+
+    const r = await core.feishuSync(spec())
+    assert.equal(r.ok, true, JSON.stringify(r))
+  })
+
+  test('内容真不同时仍然是冲突（假冲突修复不能放过真冲突）', async () => {
+    await writeLocal('a.md', '# 原始\n')
+    assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)
+
+    const st = await readState(stateFile)
+    st.files['a.md'].content = '# 远端改的\n'
+    st.files['a.md'].modified += 5000
+    await writeFile(stateFile, JSON.stringify(st))
+    await writeLocal('a.md', '# 本地改的\n')
+
+    const before = await core.feishuStatus(spec())
+    assert.deepEqual(before.conflict.map((c) => c.rel), ['a.md'], '真冲突必须仍然被认出')
+    const r = await core.feishuSync(spec())
+    assert.equal(r.ok, false)
+    assert.equal(r.step, 'conflict')
+    assert.equal(await readFile(join(cacheDir, 'a.md'), 'utf8'), '# 本地改的\n', '冲突时本地不被覆盖')
+    assert.equal((await readState(stateFile)).files['a.md'].content, '# 远端改的\n', '冲突时远端不被覆盖')
+  })
+
+  test('index.md 双侧都改 ≠ 冲突（派生文件重生成，绝不阻塞同步）', async () => {
+    // 真实场景（5 楼服务器实测）：两台机器各自重生成 index.md，内容只是概念计数不同，
+    // 被当成「两侧都改」→ 同步永久停下。index.md 是派生文件，必须按本地目录树重生成。
+    await writeLocal('a.md', '---\ntype: Reference\ntitle: A\n---\n\nA\n')
+    await core.refreshIndex(cacheDir)
+    assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)
+    assert.ok((await readState(stateFile)).files['index.md'], '基线后远端应有 index.md')
+
+    // 两侧都动 index.md：本地重生成一次，远端也改一次
+    await core.refreshIndex(cacheDir)
+    const st = await readState(stateFile)
+    st.files['index.md'].content = '# Knowledge Bundle\n\n（远端自己的一份）\n'
+    st.files['index.md'].modified += 5000
+    await writeFile(stateFile, JSON.stringify(st))
+
+    const before = await core.feishuStatus(spec())
+    assert.ok(
+      before.conflict.some((c) => c.rel === 'index.md'),
+      '前置条件：index.md 应被判为两侧都改',
+    )
+    const r = await core.feishuSync(spec())
+    assert.equal(r.ok, true, `index.md 不该阻塞同步：${JSON.stringify(r)}`)
+    const after = await readState(stateFile)
+    assert.match(after.files['index.md'].content, /a\.md/, '远端 index 应被重生成覆盖')
+  })
+
   test('无索引（首次）时的冲突策略：adopt=remote 拉远端、adopt=local 推本地', async () => {
     await writeLocal('a.md', 'local version\n')
     // 远端先有同名但不同内容，且本地没有索引 → 未知状态
