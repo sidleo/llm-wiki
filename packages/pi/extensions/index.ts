@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 扩展版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const PI_VERSION = "0.5.0";
+const PI_VERSION = "0.6.0";
 
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;
@@ -442,6 +442,8 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
       cache_dir: Type.Optional(Type.String({ description: "init（飞书）：本地缓存目录" })),
       adopt: Type.Optional(Type.String({ description: "飞书首次同步裁决：local | remote", enum: ["local", "remote"] })),
       identity: Type.Optional(Type.String({ description: "飞书 lark-cli 身份：auto=谁可用用谁（缺省，user 优先）；user/bot=锁定该身份（不可用即报错，不回退）", enum: ["auto", "user", "bot"] })),
+      paths: Type.Optional(Type.Array(Type.String(), { description: "delete：要删除的 bundle 相对路径。必须显式点名——本工具绝不按差异推断该删什么" })),
+      apply: Type.Optional(Type.Boolean({ description: "delete：true=真正执行；缺省 false=预演（只列出将删项，两侧都不动）" })),
       url: Type.Optional(Type.String({ description: "clone：远端 URL" })),
       dir: Type.Optional(Type.String({ description: "clone：本地目标目录" })),
       name: Type.Optional(Type.String({ description: "init/clone：注册为命名 bundle" })),
@@ -469,6 +471,27 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
           return ok(feishu ? formatSync("feishu", action, await core.feishuStatus(resolved, { identity })) : formatSync("git", action, await core.gitStatus(resolved.path)));
         }
         if (feishu) {
+          if (action === "delete") {
+            const r: any = await core.feishuDelete(resolved, { paths: params.paths, apply: params.apply === true, identity });
+            const lines: string[] = [];
+            if (r.dryRun) {
+              lines.push(`预演：将删除 ${r.willDelete.length} 个文件（未删任何东西）`);
+              for (const p of r.willDelete) lines.push(`- ${p}`);
+              if (r.missing?.length) lines.push(`已经不存在的：${r.missing.join("、")}`);
+              lines.push(`- 下一步：${r.next}`);
+            } else if (r.ok) {
+              lines.push(`已删除 ${r.deleted.length} 个文件（本地 + 飞书 + 账本）：`);
+              for (const p of r.deleted) lines.push(`- ${p}`);
+              if (r.missing?.length) lines.push(`本来就不存在（跳过）：${r.missing.join("、")}`);
+            } else {
+              lines.push(`删除失败（${r.step || "unknown"}）：${r.error || "未知错误"}`);
+              for (const b of r.blocked || []) lines.push(`- 拒删 ${b.rel}：${b.reason}`);
+              for (const f of r.failed || []) lines.push(`- 失败 ${f.rel}（${f.step}）：${f.error}`);
+              if (r.deleted?.length) lines.push(`- 已删（不可逆）：${r.deleted.join("、")}`);
+              if (r.next) lines.push(`- 下一步：${r.next}`);
+            }
+            return ok(lines.join("\n"));
+          }
           if (action === "sync") return ok(formatSync("feishu", action, { ...(await core.feishuSync(resolved, { adopt: params.adopt, message: params.message, identity })), bundle: resolved }));
           if (action === "pull" || action === "push") {
             const before = await core.feishuStatus(resolved, { identity });

@@ -764,3 +764,140 @@ export async function feishuForget(spec) {
   await rm(join(s.cacheDir, CLOUD_INDEX_FILE), { force: true })
   return { ok: true, cacheDir: s.cacheDir }
 }
+
+/**
+ * 删除两侧的指定文件（v1 唯一会删远端数据的入口，必须显式点名路径）。
+ *
+ * 为什么需要它：v1「不同步删除」把「一侧有、另一侧无」无条件当新增，
+ * 所以只在一侧删必被下次同步复活（见知识库同名坑点）。要真删除，
+ * 必须**同时抹掉本地文件与远端文件**，并把账本条目一并清掉。
+ *
+ * 安全设计（两条红线，都不做例外）：
+ * 1. **只删显式传入的 paths**：绝不按「差异」推断该删什么。paths 为空直接报错。
+ * 2. **另一侧被改过就不删，停下报清单**：本地该文件有未推送改动、或远端该文件
+ *    自上次同步后被改过 → 说明删的同时有人在改，交由人决定，绝不覆盖式删除。
+ *
+ * 另外：dry-run 默认关闭需显式 apply；一次调用要么全部成功要么在首个失败处停止
+ * 并如实报告「已删了哪些、还剩哪些」（删是不可逆动作，绝不假装成功）。
+ *
+ * @param {object} spec bundle spec
+ * @param {{paths?:string[], apply?:boolean, identity?:string}} [opts]
+ * @returns {Promise<{ok:boolean, dryRun?:boolean, deleted?:string[], failed?:object[], blocked?:object[], missing?:string[], error?:string, next?:string}>}
+ */
+export async function feishuDelete(spec, opts = {}) {
+  const s = feishuSpecOf(spec)
+  const paths = [...new Set((Array.isArray(opts.paths) ? opts.paths : []).map((p) => String(p).replace(/^\/+/, '').trim()).filter(Boolean))]
+  if (!paths.length) {
+    return {
+      ok: false,
+      error: '删除必须显式指定路径（本工具不会按差异推断该删什么）',
+      next: '例：wiki sync delete 表结构/旧表.md（可给多个路径）；先不带 --apply 看预演结果。',
+    }
+  }
+  for (const rel of paths) {
+    if (!inSyncScope(rel) || !rel.endsWith('.md')) {
+      return { ok: false, error: `不可删除的路径：${rel}`, next: '只能删除同步域内的 .md 概念文件（.git/.obsidian/.backup/账本等不在同步域）。' }
+    }
+  }
+
+  const idx = await readIndex(s.cacheDir)
+  const local = await scanLocal(s.cacheDir)
+  const remote = await feishuListRemote(s, opts)
+  if (!remote.ok) return remote
+  const dup = duplicateGuard(remote)
+  if (dup) return dup
+
+  const pending = []
+  const missing = []
+  const blocked = []
+
+  for (const rel of paths) {
+    const rec = idx.files[rel]
+    const lf = local.get(rel)
+    const rf = remote.files.get(rel)
+
+    // 两侧都没有 → 无可删（幂等：多半是已经删过了）
+    if (!lf && !rf) {
+      missing.push(rel)
+      // 账本若还残留则顺手清掉（这样 remoteDeleted 不再重复报告同一条）
+      if (rec) pending.push({ rel, fileToken: '', localOnly: false, ledgerOnly: true })
+      continue
+    }
+
+    // 另一侧被改过 → 停下（绝不与「有人正在改」的删除并发）
+    if (lf && rec && (rec.localMtimeMs !== lf.mtimeMs || rec.localSize !== lf.size)) {
+      blocked.push({ rel, reason: '本地该文件有未同步的改动（删掉会丢这些改动）' })
+      continue
+    }
+    if (rf && rec && rec.remoteModified !== rf.modifiedTime) {
+      blocked.push({ rel, reason: '远端该文件在上次同步后被改过（删掉会丢远端改动）' })
+      continue
+    }
+    // 无账本记录（首次同步还没建立基线）：不猜，交给人先在飞书/本地确认
+    if (!rec && lf && rf) {
+      blocked.push({ rel, reason: '两侧都存在但没有同步账本记录（无法判断是否有人改过），请先跑一次同步' })
+      continue
+    }
+
+    pending.push({ rel, fileToken: (rf && rf.fileToken) || '', localOnly: Boolean(lf), remote: Boolean(rf) })
+  }
+
+  if (blocked.length) {
+    return {
+      ok: false,
+      step: 'blocked',
+      blocked,
+      error: `${blocked.length} 个文件被拒删：${blocked.map((b) => `${b.rel}（${b.reason}）`).join('；')}`,
+      next: '确认这些改动确实要一起丢弃后再删（例如先同步或先备份），本工具不会替你覆盖未同步的改动。',
+    }
+  }
+
+  if (opts.apply !== true) {
+    return {
+      ok: true,
+      dryRun: true,
+      willDelete: pending.map((p) => p.rel),
+      missing,
+      counts: { delete: pending.length, missing: missing.length },
+      next: '这是预演（未删任何东西）。确认后加 apply: true / --apply 执行。',
+    }
+  }
+
+  const id = await resolveLarkIdentity(opts)
+  if (!id.ok) return { ok: false, error: id.error, next: id.next, identities: id.identities }
+
+  const deleted = []
+  const failed = []
+  for (const p of pending) {
+    // 远端：有 fileToken 才删（账本残留条目没有 token，只清账本）
+    if (p.fileToken) {
+      const r = unwrap(await runLark(['drive', '+delete', '--file-token', p.fileToken, '--type', 'file', '--yes', '--format', 'json', ...id.as], opts))
+      if (!r.ok) {
+        failed.push({ rel: p.rel, step: 'remote', error: r.error, next: r.next })
+        break // 不可逆动作：首个失败即停，不继续删后面的
+      }
+    }
+    // 本地
+    if (p.localOnly || (local.has(p.rel) && !p.ledgerOnly)) {
+      try {
+        await rm(join(s.cacheDir, p.rel), { force: true })
+      } catch (e) {
+        failed.push({ rel: p.rel, step: 'local', error: e && e.message ? e.message : String(e) })
+        break
+      }
+    }
+    // 账本：清掉条目，否则 status 会一直把它当 remoteDeleted 反复报告
+    delete idx.files[p.rel]
+    deleted.push(p.rel)
+  }
+  idx.lastSyncAt = new Date().toISOString()
+  await writeIndex(s.cacheDir, idx)
+
+  return {
+    ok: failed.length === 0,
+    deleted,
+    failed,
+    missing,
+    remaining: pending.slice(deleted.length + failed.length).map((p) => p.rel),
+  }
+}

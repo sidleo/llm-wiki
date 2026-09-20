@@ -252,6 +252,8 @@ window.__ModuleLoader__.load({
 			const [autoInfo, setAutoInfo] = react.default.useState(null);
 			const [autoLoading, setAutoLoading] = react.default.useState(false);
 			const [autoInterval, setAutoInterval] = react.default.useState("5");
+			const [delPaths, setDelPaths] = react.default.useState("");
+			const [delPlan, setDelPlan] = react.default.useState(null);
 			const run = react.default.useCallback(async (fn) => {
 				setBusy(true);
 				setErr("");
@@ -537,7 +539,58 @@ window.__ModuleLoader__.load({
 				href: activeEntry.folderUrl,
 				target: "_blank",
 				rel: "noreferrer"
-			}, "在飞书中打开") : null)) : e("div", null, state && state.git && state.git.ok === false ? e("div", { className: "dwWarn" }, `✕ ${state.git.error || "git 不可用"}`) : null, sync && sync.git ? sync.git.ok ? e("div", null, e("div", { className: "dwHint" }, `远端：${sync.git.remote || "（未配置）"}｜分支：${sync.git.branch || "(detached)"}${sync.git.upstream ? ` → ${sync.git.upstream}` : ""}｜领先 ${sync.git.ahead} / 落后 ${sync.git.behind}｜改动 ${sync.git.dirty.length} 个文件`), sync.git.lastCommit ? e("div", { className: "dwHint" }, `最后提交：${sync.git.lastCommit}`) : null, sync.git.conflicts && sync.git.conflicts.length ? e("div", { className: "dwWarn" }, `存在冲突：${sync.git.conflicts.join("、")}`) : null) : e("div", null, e("div", { className: "dwHint" }, sync.git.error || "git 状态不可用"), sync.git.next ? e("div", { className: "dwHint" }, sync.git.next) : null) : e("div", { className: "dwHint" }, syncLoading ? "正在读取 git 状态…" : "（未读取到状态，点「刷新状态」重试）"), e("div", { style: {
+			}, "在飞书中打开") : null), e("div", { style: {
+				marginTop: 10,
+				paddingTop: 8,
+				borderTop: "1px solid var(--dsw-alias-border-l2)"
+			} }, e("div", { className: "dwHint" }, "删除文件：只删一侧会在下次同步被「复活」，所以这里同时删本地与飞书。先预演确认，再执行。"), e(Field, {
+				label: "要删除的路径（每行一个，bundle 相对路径）",
+				value: delPaths,
+				placeholder: "如 工具环境/某条目.md",
+				disabled: busy,
+				onChange: (v) => {
+					setDelPaths(v);
+					setDelPlan(null);
+				}
+			}), e("div", { style: {
+				display: "flex",
+				gap: 8,
+				flexWrap: "wrap"
+			} }, e("button", {
+				className: "dwBtn",
+				disabled: busy || !delPaths.trim() || !(sync && sync.feishu && sync.feishu.ok),
+				onClick: () => run(async () => {
+					const paths = delPaths.split("\n").map((x) => x.trim()).filter(Boolean);
+					const r = await post("/sync", {
+						op: "delete",
+						bundle: viewBundle,
+						paths
+					});
+					setDelPlan(r);
+					setNotice(`预演：将删除 ${(r.willDelete || []).length} 个文件（未删任何东西）`);
+				})
+			}, "预演删除"), delPlan && delPlan.willDelete && delPlan.willDelete.length ? e("button", {
+				className: "dwBtn",
+				style: {
+					borderColor: "var(--dsw-alias-label-error)",
+					color: "var(--dsw-alias-label-error)"
+				},
+				disabled: busy,
+				onClick: () => run(async () => {
+					const paths = delPaths.split("\n").map((x) => x.trim()).filter(Boolean);
+					const r = await post("/sync", {
+						op: "delete",
+						bundle: viewBundle,
+						paths,
+						apply: true
+					});
+					setDelPlan(null);
+					setDelPaths("");
+					setNotice(`已删除 ${(r.deleted || []).length} 个文件（本地 + 飞书 + 账本）`);
+					await loadSync(viewBundle);
+					await loadAuto();
+				})
+			}, `确认删除这 ${delPlan.willDelete.length} 个文件（不可撤销）`) : null), delPlan && delPlan.willDelete && delPlan.willDelete.length ? e("div", { className: "dwPre" }, delPlan.willDelete.map((x) => `- ${x}`).join("\n")) : null, delPlan && delPlan.error ? e("div", { className: "dwWarn" }, `✕ ${delPlan.error}`) : null, delPlan && delPlan.blocked && delPlan.blocked.length ? e("div", { className: "dwWarn" }, delPlan.blocked.map((b) => `拒删 ${b.rel}：${b.reason}`).join("；")) : null)) : e("div", null, state && state.git && state.git.ok === false ? e("div", { className: "dwWarn" }, `✕ ${state.git.error || "git 不可用"}`) : null, sync && sync.git ? sync.git.ok ? e("div", null, e("div", { className: "dwHint" }, `远端：${sync.git.remote || "（未配置）"}｜分支：${sync.git.branch || "(detached)"}${sync.git.upstream ? ` → ${sync.git.upstream}` : ""}｜领先 ${sync.git.ahead} / 落后 ${sync.git.behind}｜改动 ${sync.git.dirty.length} 个文件`), sync.git.lastCommit ? e("div", { className: "dwHint" }, `最后提交：${sync.git.lastCommit}`) : null, sync.git.conflicts && sync.git.conflicts.length ? e("div", { className: "dwWarn" }, `存在冲突：${sync.git.conflicts.join("、")}`) : null) : e("div", null, e("div", { className: "dwHint" }, sync.git.error || "git 状态不可用"), sync.git.next ? e("div", { className: "dwHint" }, sync.git.next) : null) : e("div", { className: "dwHint" }, syncLoading ? "正在读取 git 状态…" : "（未读取到状态，点「刷新状态」重试）"), e("div", { style: {
 				display: "flex",
 				gap: 8,
 				flexWrap: "wrap",

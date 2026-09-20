@@ -47,6 +47,7 @@ export {
   feishuFlush,
   feishuCacheInfo,
   feishuForget,
+  feishuDelete,
   feishuSpecOf,
   CLOUD_INDEX_FILE,
   FEISHU_FULL_TIMEOUT_MS,

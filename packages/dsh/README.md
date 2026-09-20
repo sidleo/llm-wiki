@@ -37,6 +37,8 @@ dsh plugin --profile web add link:/path/to/packages/dsh
     status/sync/pull/push/init，三方状态增量、只推改动文件、永不删两端、冲突停下报清单）。
     **身份自动选择**：动作前读一次 `auth status` 的身份态（不做试探性读写）后挑 user/bot——
     `auto`（默认：user ready 用 user，否则回退 bot）或锁定身份（不可用即报错、不回退）。
+    **真删除**：`wiki_sync` 的 `delete` 动作（v1 不同步删除，只删一侧必复活，故两侧一起删 + 清账本）；
+    只删显式 `paths`、另一侧有未同步改动即拒删、默认预演（`apply:false`）。
 - **定时自动同步**（默认关闭）：插件内在宿主进程里跑定时器，对**飞书** bundle 按间隔自动
   推拉（默认 5 分钟，最小 1、最大 1440）。只驱动飞书后端——Git 远端同步涉及合并，保持手动。
   设置按机器存 `~/.agents/wiki-autosync.json`（core `autosync.mjs`）；同一 bundle 不并发，
@@ -97,6 +99,7 @@ node tests/dsh-mock-test.mjs        # 宿主无关 mock：14 工具注册 + 注�
 node --test tests/dsh-config-test.mjs       # 配置卡片宿主半：设置命名空间 + /api/dsh-wiki/* + 飞书分派 + 定时同步 RPC（14 项）
 node --test tests/feishu-backend.test.mjs   # 飞书云盘后端（假 lark-cli，25 项，含 user/bot 身份选择）
 node --test tests/autosync.test.mjs         # 定时自动同步（配置持久化 + 调度器 + 冲突安全，17 项）
+node --test tests/feishu-delete.test.mjs    # 真删除（只删点名路径 / 拒删未同步 / 预演默认 / 不复活，11 项）
 node --test tests/dsh-client-bundle-test.mjs # 卡片产物契约 + jsdom 渲染（5 项）
 
 # 浏览器半构建（改 src/client/ 后必须重跑）

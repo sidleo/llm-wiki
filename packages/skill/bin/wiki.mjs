@@ -21,6 +21,7 @@
  *   wiki sync init --folder-token URL|TOKEN [--name N] [--cache-dir D] [--use]   # 飞书云盘库
  *   wiki sync init --new-folder 名称 --name N [--cache-dir D] [--use]    # 飞书新建文件夹
  *   wiki sync clone URL DIR [--name N] [--use]
+ *   wiki sync delete <路径...> [--apply]     # 真删除（飞书后端；默认预演）
  *
  * 飞书库的身份：--identity auto|user|bot（缺省 auto = user 优先，不可用回退 bot）
  *   wiki sync autosync [status|on|off] [--interval MIN] [--identity I] [--name N]
@@ -57,7 +58,7 @@ async function loadCore() {
 }
 
 /** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const CLI_VERSION = '0.5.0'
+const CLI_VERSION = '0.6.0'
 
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
@@ -369,7 +370,35 @@ async function main() {
     }
     case 'sync': {
       const pos = positional(rest)
-      const sub = ['status', 'sync', 'pull', 'push', 'init', 'clone', 'autosync'].includes(pos[0]) ? pos[0] : 'sync'
+      const sub = ['status', 'sync', 'pull', 'push', 'init', 'clone', 'autosync', 'delete'].includes(pos[0]) ? pos[0] : 'sync'
+
+      // 真删除（飞书后端）：v1 不同步删除，只删一侧必复活，故这里两侧一起删 + 清账本
+      if (sub === 'delete') {
+        if (!isFeishu) {
+          console.error('delete 只支持飞书云盘库（本地目录 bundle 的删除请直接用 git / 文件系统）')
+          process.exit(1)
+        }
+        const paths = positional(rest).slice(1)
+        const r = await core.feishuDelete(resolved, { paths, apply: has(rest, '--apply'), identity: arg(rest, '--identity') || 'auto' })
+        if (r.dryRun) {
+          console.log(`预演：将删除 ${r.willDelete.length} 个文件（未删任何东西）`)
+          for (const p of r.willDelete) console.log(`  - ${p}`)
+          if (r.missing && r.missing.length) console.log(`已经不存在的：${r.missing.join('、')}`)
+          console.log(`下一步：${r.next}`)
+        } else if (r.ok) {
+          console.log(`已删除 ${r.deleted.length} 个文件（本地 + 飞书 + 账本）`)
+          for (const p of r.deleted) console.log(`  - ${p}`)
+          if (r.missing && r.missing.length) console.log(`本来就不存在（跳过）：${r.missing.join('、')}`)
+        } else {
+          console.error(`删除失败：${r.error || '未知错误'}`)
+          for (const b of r.blocked || []) console.error(`  - 拒删 ${b.rel}：${b.reason}`)
+          for (const f of r.failed || []) console.error(`  - 失败 ${f.rel}（${f.step}）：${f.error}`)
+          if (r.deleted && r.deleted.length) console.error(`  - 已删（不可逆）：${r.deleted.join('、')}`)
+          if (r.next) console.error(`  - 下一步：${r.next}`)
+          process.exit(1)
+        }
+        break
+      }
 
       // 定时同步：只读写「每台机器一份」的设置文件；常驻定时器在 DSH 插件里跑（CLI 不做常驻）
       if (sub === 'autosync') {
@@ -543,6 +572,7 @@ async function main() {
        wiki sync init --folder-token URL|TOKEN [--name N] | wiki sync init --new-folder 名称 --name N
        wiki sync clone URL DIR [--name N] [--use]
        wiki sync autosync [status|on|off] [--interval 分钟] [--identity auto|user|bot] [--name N]
+       wiki sync delete <bundle 内路径...> [--apply]   # 飞书后端真删除（缺省预演）
        wiki prompt [--raw] [--full]   # 生成「宿主常驻要求」文本（贴进宿主的自定义指令/系统提示词）
 主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle|sync|feishu|prompt]`)
       process.exit(cmd ? 1 : 0)

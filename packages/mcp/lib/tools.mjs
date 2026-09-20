@@ -474,11 +474,12 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
       '· 飞书 bundle（云盘文件夹存原生 .md）→ lark-cli：status 看待推送/待拉取/两侧都改/远端已删；sync 推本地改动+拉远端改动；pull/push 单向；init 新建或挂载云盘文件夹并注册命名 bundle。',
       '冲突策略（两种后端一致）：index.md 本地重生成、log.md 取并集 → 永不阻塞；概念/AGENTS.md 两侧都改会停止同步并报清单，绝不 force/覆盖；飞书后端永不删除两端文件（删除只报告）。',
       '凭证与认证：git 交给 git；飞书交给 lark-cli，身份自动选择（user 优先，user 不可用则回退 bot）——可用 identity 参数锁定。详见 wiki_help sync / wiki_help feishu。',
+      '· delete（仅飞书后端）：真删除。v1 不同步删除——只删一侧必被下次同步复活，所以本动作会同时删本地与远端并清账本。默认预演（apply:false），须显式给 paths；另一侧有未同步改动时拒删并报清单。',
     ],
     {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'status=只读 | sync=双向同步 | pull=只拉 | push=只推 | init=初始化（git 远端或飞书文件夹） | clone=克隆 git 远端', enum: ['status', 'sync', 'pull', 'push', 'init', 'clone'] },
+        action: { type: 'string', description: 'status=只读 | sync=双向同步 | pull=只拉 | push=只推 | init=初始化（git 远端或飞书文件夹） | clone=克隆 git 远端 | delete=真删除两侧文件（飞书后端，需 paths）', enum: ['status', 'sync', 'pull', 'push', 'init', 'clone', 'delete'] },
         message: { type: 'string', description: 'git sync 时的提交信息（缺省自动生成）' },
         bundle: { type: 'string', description: '目标命名 bundle（缺省=当前生效目录）' },
         remote: { type: 'string', description: 'init（git）：远端 URL' },
@@ -487,6 +488,8 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
         cache_dir: { type: 'string', description: 'init（飞书）：本地缓存目录（缺省 ~/.agents/wiki-cloud/<名字>）' },
         adopt: { type: 'string', description: '飞书首次同步的裁决：local=以本地为准推送，remote=以远端为准拉取（缺省 local）', enum: ['local', 'remote'] },
         identity: { type: 'string', description: '飞书 lark-cli 身份：auto=谁可用用谁（缺省，user 优先）；user/bot=锁定该身份（不可用即报错，不回退）', enum: ['auto', 'user', 'bot'] },
+        paths: { type: 'array', items: { type: 'string' }, description: 'delete：要删除的 bundle 相对路径（如 ["tables/旧表.md"]）。必须显式点名——本工具绝不按差异推断该删什么' },
+        apply: { type: 'boolean', description: 'delete：true=真正执行；缺省 false=预演（只列出将删项，两侧都不动）' },
         url: { type: 'string', description: 'clone：远端 URL' },
         dir: { type: 'string', description: 'clone：本地目标目录（须不存在或为空）' },
         name: { type: 'string', description: 'init/clone：同时注册为命名 bundle（各形态共享注册表）' },
@@ -523,6 +526,28 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
           return { text: isFeishu ? formatFeishuResult('status', await core.feishuStatus(active, { identity })) : formatGitResult('status', await core.gitStatus(active.path)) }
         }
         if (isFeishu) {
+          if (action === 'delete') {
+            const r = await core.feishuDelete(active, { paths: args.paths, apply: args.apply === true, identity })
+            invalidateCaches()
+            const lines = []
+            if (r.dryRun) {
+              lines.push(`预演：将删除 ${r.willDelete.length} 个文件（未删任何东西）`)
+              for (const p of r.willDelete) lines.push(`- ${p}`)
+              if (r.missing && r.missing.length) lines.push(`已经不存在的：${r.missing.join('、')}`)
+              lines.push(`- 下一步：${r.next}`)
+            } else if (r.ok) {
+              lines.push(`已删除 ${r.deleted.length} 个文件（本地 + 飞书 + 账本）：`)
+              for (const p of r.deleted) lines.push(`- ${p}`)
+              if (r.missing && r.missing.length) lines.push(`本来就不存在（跳过）：${r.missing.join('、')}`)
+            } else {
+              lines.push(`删除失败（${r.step || 'unknown'}）：${r.error || '未知错误'}`)
+              for (const b of r.blocked || []) lines.push(`- 拒删 ${b.rel}：${b.reason}`)
+              for (const f of r.failed || []) lines.push(`- 失败 ${f.rel}（${f.step}）：${f.error}`)
+              if (r.deleted && r.deleted.length) lines.push(`- 已删（不可逆）：${r.deleted.join('、')}`)
+              if (r.next) lines.push(`- 下一步：${r.next}`)
+            }
+            return { text: lines.join('\n') }
+          }
           if (action === 'pull') {
             const before = await core.feishuStatus(active, { identity })
             if (!before.ok) return { text: formatFeishuResult('pull', before) }
@@ -546,7 +571,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
             if (r.ok) clearOverride()
             return { text: formatFeishuResult('sync', { ...r, bundle: active }) }
           }
-          return { text: `飞书后端不支持 action「${args.action}」：可用 status | sync | pull | push | init。` }
+          return { text: `飞书后端不支持 action「${args.action}」：可用 status | sync | pull | push | init | delete。` }
         }
 
         if (action === 'sync' || action === 'push' || action === 'pull') {

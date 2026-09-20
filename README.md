@@ -112,11 +112,18 @@ wiki sync                 # push local changes + pull remote changes (only chang
 
 # Scheduled auto-sync (interval/identity per machine; timer runs inside the DSH plugin)
 wiki sync autosync status|on|off [--interval 5] [--identity auto|user|bot]
+
+# Real deletion (Feishu backend): v1 does not sync deletions, so deleting one side is
+# undone by the next sync. This deletes both sides + prunes the ledger. Dry-run by default.
+wiki sync delete <path...>          # preview only
+wiki sync delete <path...> --apply  # execute
 ```
 
 Three-way state lives in the cache's `.wiki-cloud.json` (fileToken, remote `modified_time`, local mtime/size): one-sided changes transfer, two-sided changes stop the sync with a conflict list. A pull that overwrites a local file backs it up under `.backup/<timestamp>/` first. Requires `lark-cli` (`lark-cli auth login`, or a bot identity with scopes + folder access); see `wiki help feishu`.
 
 **Identity is auto-selected.** Every action reads the identity state from `lark-cli auth status` once (never a probe read/write against the remote) and picks: `auto` (default — user if ready, else bot), or a pinned `user`/`bot` that errors instead of falling back. Note that a bot's permissions come from the app: private "My Space" folders are usually unreachable for it, so `auto` normally resolves to `user`.
+
+**Deletion (Feishu backend)**: v1 never syncs deletions — the three-way diff treats "present on one side only" as *new*, so a one-sided delete is resurrected by the next sync (local delete → pulled back; Feishu delete → pushed back). `wiki sync delete` (or `wiki_sync` with `action: delete`) removes both sides and prunes the ledger entry. Two non-negotiable guards: it only deletes **explicitly named paths** (never infers deletions from a diff), and it **refuses when the other side has unsynced changes** (reports the list instead of overwriting). Dry-run is the default. For content that is merely superseded, prefer `status: deprecated`. Note that scheduled auto-sync widens the window in which a stray delete gets resurrected.
 
 **Scheduled auto-sync** (off by default) stores its switch/interval/identity per machine in `~/.agents/wiki-autosync.json` — default interval **5 minutes** (min 1, max 1440). The timer lives in the DSH plugin's host process (so it stops when DSH stops; use a system scheduler to run `wiki sync` otherwise) and only ever drives **Feishu** bundles, since Git remote sync involves merges that should stay manual. One bundle never runs concurrently, a failure is recorded rather than fatal, and conflicts still stop and report without overwriting either side.
 
@@ -182,6 +189,7 @@ node --test tests/dsh-config-test.mjs    # 14 checks: config card host half (set
 node --test tests/git-sync.test.mjs      # 8 checks: Git remote sync (sequential writes / concurrent log / index / concept conflicts)
 node --test tests/feishu-backend.test.mjs # 25 checks: Feishu cloud-drive backend (3-way diff, changed-files-only, conflict stop, log union, argv safety, user/bot identity selection)
 node --test tests/autosync.test.mjs      # 17 checks: scheduled auto-sync (config persistence, interval/identity clamping, run recording, scheduler + conflict safety)
+node --test tests/feishu-delete.test.mjs # 11 checks: real deletion (explicit-paths-only, refuses unsynced-side deletes, dry-run default, no resurrection, stop-on-first-failure, CLI end-to-end)
 node --test tests/dsh-client-bundle-test.mjs   # 5 checks: card bundle contract + jsdom render smoke
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 checks: pi extension (mock pi)
 (cd packages/mcp && npm install && npm test)   # 17 checks: MCP form (SDK stdio client end-to-end + tool/output parity with the DSH plugin + stdout purity)

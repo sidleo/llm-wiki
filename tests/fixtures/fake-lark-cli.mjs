@@ -46,7 +46,7 @@ const AS = (() => {
   return v === 'bot' || v === 'user' ? v : 'user'
 })()
 const deny = process.env.FAKE_LARK_USER_DENIED === '1' && AS === 'user' ? true : process.env.FAKE_LARK_BOT_DENIED === '1' && AS === 'bot'
-const WRITE_CMDS = ['+create', '+overwrite', '+create-folder']
+const WRITE_CMDS = ['+create', '+overwrite', '+create-folder', '+delete']
 const denyWriteOnly = process.env.FAKE_LARK_DENY_WRITES === '1'
 const denyMessage =
   AS === 'bot'
@@ -140,7 +140,7 @@ if (LOG) appendFileSync(LOG, JSON.stringify({ argv }) + '\n')
 
 const [domain, cmd] = argv
 // 只有写命令需要串行化；读命令靠 save() 的原子替换（tmp+rename）保证读不到半截状态
-if ((domain === 'drive' && cmd === '+create-folder') || (domain === 'markdown' && (cmd === '+create' || cmd === '+overwrite'))) acquireLock()
+if ((domain === 'drive' && (cmd === '+create-folder' || cmd === '+delete')) || (domain === 'markdown' && (cmd === '+create' || cmd === '+overwrite'))) acquireLock()
 const st = load()
 
 if (domain === 'auth' && cmd === 'status') {
@@ -192,6 +192,17 @@ if (domain === 'drive' && cmd === '+create-folder') {
   st.dirs[rel] = { token, parent: parentRel }
   save(st)
   ok({ folder_token: token, parent_folder_token: parentToken, name, url: `https://feishu.cn/drive/folder/${token}` })
+}
+
+if (domain === 'drive' && cmd === '+delete') {
+  const token = flag('--file-token')
+  const hit = Object.entries(st.files).find(([, f]) => f.fileToken === token)
+  if (!hit) fail(`file not found: ${token}`, 'not_found')
+  // 真 CLI 是 high-risk-write，必须有 --yes；假桩照抄这条契约，防止调用方漏传
+  if (!has('--yes')) fail('high-risk operation requires --yes', 'validation')
+  delete st.files[hit[0]]
+  save(st)
+  ok({ deleted: true, file_token: token, type: flag('--type') || 'file', status: 'success' })
 }
 
 if (domain === 'markdown' && cmd === '+create') {

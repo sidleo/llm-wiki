@@ -112,11 +112,18 @@ wiki sync                 # 推本地改动 + 拉远端改动（只传改动文�
 
 # 定时自动同步（开关/间隔/身份每台机器一份；定时器跑在 DSH 插件宿主进程内）
 wiki sync autosync status|on|off [--interval 5] [--identity auto|user|bot]
+
+# 真删除（飞书后端）：v1 不同步删除，只删一侧会被下次同步复活；
+# 这条命令两侧一起删并清账本。默认预演。
+wiki sync delete <路径...>          # 预演
+wiki sync delete <路径...> --apply  # 执行
 ```
 
 三方状态判定（本地缓存里的 `.wiki-cloud.json` 记录每文件的 fileToken、远端 modified_time、本地 mtime/size）：只有一侧变就单向传；两侧都变就停下来报冲突。拉取覆盖本地前会先备份到 `.backup/<时间戳>/`。依赖 `lark-cli`（`lark-cli auth login`，或用 scope 与文件夹权限齐备的 bot 身份）；详见 `wiki help feishu`。
 
 **身份自动选择**：每次动作前读一次 `lark-cli auth status` 的身份态（绝不为了试探而读写远端）后挑身份——`auto`（默认，user ready 用 user，否则回退 bot）、或锁定的 `user`/`bot`（不可用即报错、不回退）。注意 bot 的权限来自应用且通常够不到私有的「我的空间」文件夹，所以 `auto` 实际多数时候落到 user。
+
+**删除（飞书后端）**：v1 不同步删除——三方判定把「一侧有、另一侧无」当新增，所以只删一侧必被下次同步复活（本地删→拉回；飞书删→推回）。`wiki sync delete`（或 `wiki_sync` 的 `action: delete`）同时删两侧并清账本条目。两条红线不可协商：**只删显式点名的路径**（绝不按差异推断）、**另一侧有未同步改动就拒删并报清单**（不覆盖）。默认预演。内容只是被取代时优先用 `status: deprecated`。注意定时同步会扩大「误删被复活」的窗口。
 
 **定时自动同步**（默认关闭）：开关/间隔/身份按机器存 `~/.agents/wiki-autosync.json`，间隔默认 **5 分钟**（最小 1、最大 1440）。定时器在 DSH 插件宿主进程内（DSH 停则停；要 DSH 关闭也同步，改用系统计划任务调 `wiki sync`），且**只驱动飞书后端**——Git 远端同步涉及合并，保持手动。同一 bundle 不并发，失败只记录不停表，冲突照旧停下报告、绝不覆盖任一侧。
 
