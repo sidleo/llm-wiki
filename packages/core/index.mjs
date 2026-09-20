@@ -32,6 +32,8 @@ export { gitAvailable, gitStatus, gitSync, gitInit, gitClone, DEFAULT_GIT_TIMEOU
 // 飞书在线知识库（云盘文件夹 + 原生 .md 文件树后端）：经 lark-cli 读写，格式零损失
 export {
   larkAvailable,
+  resolveLarkIdentity,
+  LARK_IDENTITIES,
   feishuInit,
   feishuStatus,
   feishuPull,
@@ -49,6 +51,24 @@ export {
   CLOUD_INDEX_FILE,
   FEISHU_FULL_TIMEOUT_MS,
 } from './lib/feishu.mjs'
+
+// 定时自动同步：配置持久化（每台机器一份，~/.agents/wiki-autosync.json）+ 调度判据
+export {
+  DEFAULT_INTERVAL_MINUTES,
+  MIN_INTERVAL_MINUTES,
+  MAX_INTERVAL_MINUTES,
+  AUTOSYNC_IDENTITIES,
+  autosyncFile,
+  readAutosync,
+  writeAutosync,
+  normalizeInterval,
+  normalizeIdentity,
+  autosyncSettingsFor,
+  setAutosyncSettings,
+  recordAutosyncRun,
+  markAutosyncRunning,
+  isStaleRunning,
+} from './lib/autosync.mjs'
 
 // 命名 bundle 注册表：默认数据目录 ~/.agents/wiki + 多目录注册/切换（跨三形态）
 export {

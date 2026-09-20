@@ -398,4 +398,110 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
     assert.equal(calls.filter((a) => a[1] === '+create-folder').length, 0, '重复状态下不得建目录')
     assert.equal(calls.filter((a) => a[1] === '+create').length, 0, '重复状态下不得写文件')
   })
+
+  describe('身份自动选择（user / bot）', () => {
+    /** 只在用例期间设置身份相关的假桩开关，结束恢复。 */
+    async function withIdentityEnv(vars, fn) {
+      const prev = {}
+      for (const [k, v] of Object.entries(vars)) {
+        prev[k] = process.env[k]
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+      try {
+        return await fn()
+      } finally {
+        for (const [k, v] of Object.entries(prev)) {
+          if (v === undefined) delete process.env[k]
+          else process.env[k] = v
+        }
+      }
+    }
+
+    test('auto：user 可用时用 user（默认路径不变）', async () => {
+      const r = await core.feishuStatus(spec())
+      assert.equal(r.ok, true)
+      const calls = await readLog(logFile)
+      const list = calls.find((a) => a[1] === 'files')
+      assert.deepEqual(list.slice(-2), ['--as', 'user'], JSON.stringify(list))
+    })
+
+    test('auto：user 不可用 → 自动回退 bot，全程 --as bot', async () => {
+      await withIdentityEnv({ FAKE_LARK_USER_READY: '0' }, async () => {
+        await writeLocal('tables/orders.md', '# o\n')
+        const r = await core.feishuSync(spec(), { adopt: 'local' })
+        assert.equal(r.ok, true, JSON.stringify(r))
+        assert.equal(r.pushed.length, 1)
+        const calls = await readLog(logFile)
+        const real = calls.filter((a) => a[0] !== 'auth')
+        assert.ok(real.length >= 3)
+        assert.ok(
+          real.every((a) => a[a.length - 2] === '--as' && a[a.length - 1] === 'bot'),
+          JSON.stringify(real),
+        )
+      })
+    })
+
+    test('auto：user 与 bot 都不可用 → 明确报错，不发起任何真实调用', async () => {
+      await withIdentityEnv({ FAKE_LARK_USER_READY: '0', FAKE_LARK_BOT_READY: '0' }, async () => {
+        const r = await core.feishuSync(spec())
+        assert.equal(r.ok, false)
+        assert.match(r.error, /都不可用/)
+        assert.deepEqual(await readLog(logFile).then((c) => c.filter((a) => a[0] !== 'auth')), [])
+      })
+    })
+
+    test('identity: bot 锁定 bot（即使 user 可用）；bot 无 scope 时报错并指向 scope 申请', async () => {
+      await withIdentityEnv({ FAKE_LARK_BOT_DENIED: '1' }, async () => {
+        await writeLocal('tables/orders.md', '# o\n')
+        const pushed = await core.feishuPush(spec(), { identity: 'bot', paths: ['tables/orders.md'] })
+        assert.equal(pushed.ok, false)
+        assert.match(pushed.error, /scope/)
+        assert.match(pushed.next, /identity: user/)
+        const real = (await readLog(logFile)).filter((a) => a[0] !== 'auth')
+        assert.ok(real.length > 0)
+        assert.ok(real.every((a) => a.includes('--as') && a[a.length - 1] === 'bot'), JSON.stringify(real))
+      })
+    })
+
+    test('单文件写失败（列表通过、overwrite 被拒）也带 scope 指引', async () => {
+      // 先让 bot 正常推一次建立 fileToken，再打开 bot 拒绝 → overwrite 失败进 failed[]
+      await withIdentityEnv({ FAKE_LARK_BOT_READY: '1' }, async () => {
+        await writeLocal('tables/orders.md', '# o\n')
+        const first = await core.feishuPush(spec(), { identity: 'bot', paths: ['tables/orders.md'] })
+        assert.equal(first.ok, true, JSON.stringify(first))
+      })
+      await withIdentityEnv({ FAKE_LARK_DENY_WRITES: '1' }, async () => {
+        await writeLocal('tables/orders.md', '# o2\n')
+        const second = await core.feishuPush(spec(), { identity: 'bot', paths: ['tables/orders.md'] })
+        assert.equal(second.ok, false)
+        assert.equal(second.failed.length, 1)
+        assert.match(second.failed[0].next, /scope|identity: user/)
+      })
+    })
+
+    test('identity: user 锁定时，user 失效不回退 bot，且给出续期/切换建议', async () => {
+      await withIdentityEnv({ FAKE_LARK_USER_READY: '0' }, async () => {
+        const r = await core.feishuPush(spec(), { identity: 'user', paths: [] })
+        assert.equal(r.ok, false)
+        assert.match(r.error, /user 身份不可用/)
+        assert.match(r.next, /identity: auto\/bot|auth login/)
+      })
+      assert.deepEqual(await readLog(logFile).then((c) => c.filter((a) => a[0] !== 'auth')), [])
+    })
+
+    test('未知 identity 值直接报错（不静默回落）', async () => {
+      const r = await core.resolveLarkIdentity({ identity: 'robot' })
+      assert.equal(r.ok, false)
+      assert.match(r.error, /未知的 identity/)
+    })
+
+    test('user token 失效（有 scope 报错）时的提示指向登录续期', async () => {
+      await withIdentityEnv({ FAKE_LARK_USER_DENIED: '1' }, async () => {
+        const r = await core.feishuListRemote(spec())
+        assert.equal(r.ok, false)
+        assert.match(r.next, /auth login|identity: auto\/bot/)
+      })
+    })
+  })
 })

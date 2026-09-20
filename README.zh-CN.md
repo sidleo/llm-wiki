@@ -109,9 +109,16 @@ wiki sync init --folder-token https://feishu.cn/drive/folder/fldcnXXXX --name �
 # 日常
 wiki sync status          # 待推送 / 待拉取 / 两侧都改 / 远端已删
 wiki sync                 # 推本地改动 + 拉远端改动（只传改动文件）
+
+# 定时自动同步（开关/间隔/身份每台机器一份；定时器跑在 DSH 插件宿主进程内）
+wiki sync autosync status|on|off [--interval 5] [--identity auto|user|bot]
 ```
 
-三方状态判定（本地缓存里的 `.wiki-cloud.json` 记录每文件的 fileToken、远端 modified_time、本地 mtime/size）：只有一侧变就单向传；两侧都变就停下来报冲突。拉取覆盖本地前会先备份到 `.backup/<时间戳>/`。依赖 `lark-cli` 已登录（`lark-cli auth login`）；详见 `wiki help feishu`。
+三方状态判定（本地缓存里的 `.wiki-cloud.json` 记录每文件的 fileToken、远端 modified_time、本地 mtime/size）：只有一侧变就单向传；两侧都变就停下来报冲突。拉取覆盖本地前会先备份到 `.backup/<时间戳>/`。依赖 `lark-cli`（`lark-cli auth login`，或用 scope 与文件夹权限齐备的 bot 身份）；详见 `wiki help feishu`。
+
+**身份自动选择**：每次动作前读一次 `lark-cli auth status` 的身份态（绝不为了试探而读写远端）后挑身份——`auto`（默认，user ready 用 user，否则回退 bot）、或锁定的 `user`/`bot`（不可用即报错、不回退）。注意 bot 的权限来自应用且通常够不到私有的「我的空间」文件夹，所以 `auto` 实际多数时候落到 user。
+
+**定时自动同步**（默认关闭）：开关/间隔/身份按机器存 `~/.agents/wiki-autosync.json`，间隔默认 **5 分钟**（最小 1、最大 1440）。定时器在 DSH 插件宿主进程内（DSH 停则停；要 DSH 关闭也同步，改用系统计划任务调 `wiki sync`），且**只驱动飞书后端**——Git 远端同步涉及合并，保持手动。同一 bundle 不并发，失败只记录不停表，冲突照旧停下报告、绝不覆盖任一侧。
 
 ### 图形化配置（DSH Web GUI）
 
@@ -122,6 +129,7 @@ wiki sync                 # 推本地改动 + 拉远端改动（只传改动文�
 | 命名目录 | 增删/改名/设默认 | `~/.agents/wiki-registry.json`（与 CLI/pi 共享，删除只摘注册不动数据） |
 | 在线同步 | 按后端显示：Git（远端/分支/领先落后）或飞书（待推送/待拉取/冲突/文件夹链接）+ 同步/拉取/推送/初始化/克隆 | 走 core `git.mjs` / `feishu.mjs`，与 `wiki_sync` 同一实现 |
 | 命名目录 | 新增类型可选「本地目录」或「飞书云盘库」（可一键在飞书新建文件夹并注册） | `~/.agents/wiki-registry.json`（飞书条目为对象形态：kind/folderToken/cacheDir） |
+| 定时自动同步 | 开关、间隔（默认 5 分钟）、飞书身份，附「立即同步一次」与上次结果 | `~/.agents/wiki-autosync.json`（每台机器一份），由插件内定时器驱动 |
 | 体检与索引 | validate/lint 计数与明细、重建 index | core `validateBundle`/`lintBundle`/`refreshIndex` |
 
 （运行参数不在卡片里：数据目录、注入 section 名/order、各上限、缓存 TTL 都是部署级配置，改 profile 的 `cordis.patch.yml`。）

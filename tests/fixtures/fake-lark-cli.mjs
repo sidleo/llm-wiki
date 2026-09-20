@@ -31,6 +31,29 @@ const LOG = process.env.FAKE_LARK_LOG
 const ROOT = process.env.FAKE_LARK_ROOT || 'fldcnROOT'
 
 /**
+ * 身份：镜像真实 CLI 的 --as（user | bot），并支持用环境变量把某个身份做成
+ * 「不可用 / 无 scope」，用于测「user 不可用则自动回退 bot」这类分支。
+ *   FAKE_LARK_USER_READY=0  → auth status 里 user.available=false
+ *   FAKE_LARK_BOT_READY=0   → auth status 里 bot.available=false
+ *   FAKE_LARK_USER_DENIED=1 → 由 user 发起的调用一律返回授权错误
+ *   FAKE_LARK_BOT_DENIED=1  → 由 bot 发起的调用返回 app_scope_not_applied
+ *   FAKE_LARK_DENY_WRITES=1 → 只让写命令（+create / +overwrite / +create-folder）失败，
+ *                             用于测「列举通过、单文件写被拒」这条分支
+ */
+const AS = (() => {
+  const i = argv.indexOf('--as')
+  const v = i >= 0 ? argv[i + 1] : undefined
+  return v === 'bot' || v === 'user' ? v : 'user'
+})()
+const deny = process.env.FAKE_LARK_USER_DENIED === '1' && AS === 'user' ? true : process.env.FAKE_LARK_BOT_DENIED === '1' && AS === 'bot'
+const WRITE_CMDS = ['+create', '+overwrite', '+create-folder']
+const denyWriteOnly = process.env.FAKE_LARK_DENY_WRITES === '1'
+const denyMessage =
+  AS === 'bot'
+    ? 'access denied: app cli_fake has not applied for the required scope(s): drive:drive, space:document:retrieve'
+    : 'access denied: user token expired, please login again'
+
+/**
  * 并发安全：core 现在会并发调用 lark-cli（列表/拉取/推送并发度 6），
  * 而真 CLI 背后是服务端、天然并发安全；假桩共用一份 JSON 状态文件，
  * 必须自己加锁 + 原子替换，否则并发调用会互相覆盖（丢文件/丢目录）。
@@ -83,12 +106,12 @@ function save(st) {
 }
 function ok(data) {
   releaseLock()
-  process.stdout.write(JSON.stringify({ ok: true, identity: 'user', data }) + '\n')
+  process.stdout.write(JSON.stringify({ ok: true, identity: AS, data }) + '\n')
   process.exit(0)
 }
 function fail(message, type = 'api_error') {
   releaseLock()
-  process.stdout.write(JSON.stringify({ ok: false, identity: 'user', error: { type, message } }) + '\n')
+  process.stdout.write(JSON.stringify({ ok: false, identity: AS, error: { type, message } }) + '\n')
   process.exit(1)
 }
 function flag(name) {
@@ -123,9 +146,24 @@ const st = load()
 if (domain === 'auth' && cmd === 'status') {
   // 严格镜像真实 CLI：auth status 不接受 --format，且输出裸对象（无 {ok,data} 信封）
   if (has('--format')) fail('unknown flag "--format" for "lark-cli auth status"', 'validation')
-  process.stdout.write(JSON.stringify({ appId: 'cli_fake', brand: 'feishu', defaultAs: 'auto', identities: { user: { status: 'ready', available: true, userName: '测试用户', openId: 'ou_test' }, bot: { status: 'ready', available: true } } }) + '\n')
+  const userReady = process.env.FAKE_LARK_USER_READY !== '0'
+  const botReady = process.env.FAKE_LARK_BOT_READY !== '0'
+  process.stdout.write(
+    JSON.stringify({
+      appId: 'cli_fake',
+      brand: 'feishu',
+      defaultAs: 'auto',
+      identities: {
+        user: { status: userReady ? 'ready' : 'expired', available: userReady, userName: '测试用户', openId: 'ou_test' },
+        bot: { status: botReady ? 'ready' : 'unavailable', available: botReady },
+      },
+    }) + '\n',
+  )
   process.exit(0)
 }
+
+// 身份被做成不可用/无 scope 时：任何真实调用都失败（auth status 除外，它是探测入口）
+if (deny || (denyWriteOnly && WRITE_CMDS.includes(cmd))) fail(denyMessage, AS === 'bot' ? 'authorization' : 'auth')
 
 if (domain === 'drive' && cmd === 'files' && argv[2] === 'list') {
   const params = JSON.parse(flag('--params') || '{}')

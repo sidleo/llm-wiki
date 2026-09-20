@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 扩展版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const PI_VERSION = "0.4.15";
+const PI_VERSION = "0.5.0";
 
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;
@@ -441,6 +441,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
       new_folder: Type.Optional(Type.String({ description: "init（飞书）：在我的空间新建同名文件夹" })),
       cache_dir: Type.Optional(Type.String({ description: "init（飞书）：本地缓存目录" })),
       adopt: Type.Optional(Type.String({ description: "飞书首次同步裁决：local | remote", enum: ["local", "remote"] })),
+      identity: Type.Optional(Type.String({ description: "飞书 lark-cli 身份：auto=谁可用用谁（缺省，user 优先）；user/bot=锁定该身份（不可用即报错，不回退）", enum: ["auto", "user", "bot"] })),
       url: Type.Optional(Type.String({ description: "clone：远端 URL" })),
       dir: Type.Optional(Type.String({ description: "clone：本地目标目录" })),
       name: Type.Optional(Type.String({ description: "init/clone：注册为命名 bundle" })),
@@ -456,27 +457,28 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
           return ok(formatSync("git", action, await core.gitClone(params.url, params.dir, { name: params.name, use: params.use === true })));
         }
         if (action === "init" && (params.folder_token || params.new_folder)) {
-          return ok(formatSync("feishu", "init", await core.feishuInit({ name: params.name, folderToken: params.folder_token, newFolder: params.new_folder, cacheDir: params.cache_dir, use: params.use === true })));
+          return ok(formatSync("feishu", "init", await core.feishuInit({ name: params.name, folderToken: params.folder_token, newFolder: params.new_folder, cacheDir: params.cache_dir, use: params.use === true }, { identity: params.identity || "auto" })));
         }
         const resolved = params.bundle
           ? await core.resolveBundleRoot(config, { name: params.bundle })
           : await core.resolveBundleRoot(config, {});
         const feishu = resolved.kind === "feishu";
+        const identity = params.identity || "auto";
 
         if (action === "status") {
-          return ok(feishu ? formatSync("feishu", action, await core.feishuStatus(resolved)) : formatSync("git", action, await core.gitStatus(resolved.path)));
+          return ok(feishu ? formatSync("feishu", action, await core.feishuStatus(resolved, { identity })) : formatSync("git", action, await core.gitStatus(resolved.path)));
         }
         if (feishu) {
-          if (action === "sync") return ok(formatSync("feishu", action, { ...(await core.feishuSync(resolved, { adopt: params.adopt, message: params.message })), bundle: resolved }));
+          if (action === "sync") return ok(formatSync("feishu", action, { ...(await core.feishuSync(resolved, { adopt: params.adopt, message: params.message, identity })), bundle: resolved }));
           if (action === "pull" || action === "push") {
-            const before = await core.feishuStatus(resolved);
+            const before = await core.feishuStatus(resolved, { identity });
             if (!before.ok) return ok(formatSync("feishu", action, before));
             if (action === "push" && before.conflict.length) {
               return ok(formatSync("feishu", action, { ok: false, step: "conflict", conflicts: before.conflict.map((x: any) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: "请先人工处理冲突（飞书或本地任选一侧）再重跑。" }));
             }
             const r = action === "pull"
-              ? await core.feishuPull(resolved, { paths: before.pull.map((x: any) => x.rel) })
-              : await core.feishuPush(resolved, { paths: before.push.map((x: any) => x.rel) });
+              ? await core.feishuPull(resolved, { paths: before.pull.map((x: any) => x.rel), identity })
+              : await core.feishuPush(resolved, { paths: before.push.map((x: any) => x.rel), identity });
             return ok(formatSync("feishu", action, { ...r, bundle: resolved }));
           }
           return ok(`飞书后端不支持 action「${params.action}」：可用 status | sync | pull | push | init。`);

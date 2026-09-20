@@ -22,6 +22,11 @@
  *   wiki sync init --new-folder 名称 --name N [--cache-dir D] [--use]    # 飞书新建文件夹
  *   wiki sync clone URL DIR [--name N] [--use]
  *
+ * 飞书库的身份：--identity auto|user|bot（缺省 auto = user 优先，不可用回退 bot）
+ *   wiki sync autosync [status|on|off] [--interval MIN] [--identity I] [--name N]
+ *   # 定时同步的开关/间隔（每台机器一份 ~/.agents/wiki-autosync.json）；
+ *   # 定时器由 DSH 插件在宿主内跑，CLI 只读写这份设置。
+ *
  * 环境变量 WIKI_DATA_DIR 可覆盖默认数据目录 ~/.agents/wiki。
  * 多目录（命名 bundle）：注册表 ~/.agents/wiki-registry.json（env WIKI_REGISTRY_FILE 覆盖）；
  * --wiki NAME 指定分支（缺省用注册表 active 或 default）；wiki dirs 查看、wiki use 切换。
@@ -52,7 +57,7 @@ async function loadCore() {
 }
 
 /** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const CLI_VERSION = '0.4.15'
+const CLI_VERSION = '0.5.0'
 
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
@@ -364,7 +369,31 @@ async function main() {
     }
     case 'sync': {
       const pos = positional(rest)
-      const sub = ['status', 'sync', 'pull', 'push', 'init', 'clone'].includes(pos[0]) ? pos[0] : 'sync'
+      const sub = ['status', 'sync', 'pull', 'push', 'init', 'clone', 'autosync'].includes(pos[0]) ? pos[0] : 'sync'
+
+      // 定时同步：只读写「每台机器一份」的设置文件；常驻定时器在 DSH 插件里跑（CLI 不做常驻）
+      if (sub === 'autosync') {
+        const name = arg(rest, '--name') || (resolved && resolved.name) || ''
+        if (!name) {
+          console.error('usage: wiki sync autosync [status|on|off] [--interval 分钟] [--identity auto|user|bot] [--name 库名]')
+          process.exit(1)
+        }
+        const action = ['status', 'on', 'off'].includes(pos[1]) ? pos[1] : 'status'
+        if (action !== 'status') {
+          const patch = { enabled: action === 'on' }
+          const iv = arg(rest, '--interval')
+          if (iv !== undefined) patch.intervalMinutes = Number(iv)
+          const id = arg(rest, '--identity')
+          if (id !== undefined) patch.identity = id
+          await core.setAutosyncSettings(name, patch)
+        }
+        const s = await core.autosyncSettingsFor(name)
+        console.log(`定时自动同步「${name}」：${s.enabled ? '已开启' : '已关闭'}｜间隔 ${s.intervalMinutes} 分钟｜身份 ${s.identity}`)
+        if (s.lastRunAt) console.log(`上次运行：${s.lastRunAt}｜${s.lastResult && s.lastResult.ok ? `推送 ${s.lastResult.pushed}，拉取 ${s.lastResult.pulled}` : `失败：${(s.lastResult && s.lastResult.error) || '未知'}`}`)
+        console.log(`设置文件：${core.autosyncFile()}（每台机器各自一份）`)
+        if (action === 'on') console.log('定时器由 DSH 插件在宿主进程内执行；DSH 未运行时不会同步。')
+        break
+      }
 
       if (sub === 'clone') {
         const url = pos[1] || arg(rest, '--url')
@@ -381,15 +410,19 @@ async function main() {
 
       const folderToken = arg(rest, '--folder-token')
       const newFolder = arg(rest, '--new-folder')
+      const identity = arg(rest, '--identity') || 'auto'
 
       if (sub === 'init' && (folderToken || newFolder)) {
-        const r = await core.feishuInit({
-          name: arg(rest, '--name'),
-          folderToken,
-          newFolder,
-          cacheDir: arg(rest, '--cache-dir'),
-          use: has(rest, '--use'),
-        })
+        const r = await core.feishuInit(
+          {
+            name: arg(rest, '--name'),
+            folderToken,
+            newFolder,
+            cacheDir: arg(rest, '--cache-dir'),
+            use: has(rest, '--use'),
+          },
+          { identity },
+        )
         printFeishu('init', r)
         if (!r.ok) process.exit(1)
         break
@@ -410,13 +443,13 @@ async function main() {
       // 其余动作：按 bundle 后端分派
       if (isFeishu) {
         if (sub === 'status') {
-          const r = await core.feishuStatus(resolved)
+          const r = await core.feishuStatus(resolved, { identity })
           printFeishu('status', r)
           if (!r.ok) process.exit(1)
           break
         }
         if (sub === 'pull' || sub === 'push') {
-          const before = await core.feishuStatus(resolved)
+          const before = await core.feishuStatus(resolved, { identity })
           if (!before.ok) {
             printFeishu(sub, before)
             process.exit(1)
@@ -426,13 +459,13 @@ async function main() {
             process.exit(1)
           }
           const r = sub === 'pull'
-            ? await core.feishuPull(resolved, { paths: before.pull.map((x) => x.rel) })
-            : await core.feishuPush(resolved, { paths: before.push.map((x) => x.rel) })
+            ? await core.feishuPull(resolved, { paths: before.pull.map((x) => x.rel), identity })
+            : await core.feishuPush(resolved, { paths: before.push.map((x) => x.rel), identity })
           printFeishu(sub, { ...r, bundle: resolved })
           if (!r.ok) process.exit(1)
           break
         }
-        const r = await core.feishuSync(resolved, { adopt: arg(rest, '--adopt') })
+        const r = await core.feishuSync(resolved, { adopt: arg(rest, '--adopt'), identity })
         printFeishu('sync', { ...r, bundle: resolved })
         if (!r.ok) process.exit(1)
         break
@@ -509,6 +542,7 @@ async function main() {
        wiki sync [status|pull|push] [--message M] | wiki sync init --remote URL
        wiki sync init --folder-token URL|TOKEN [--name N] | wiki sync init --new-folder 名称 --name N
        wiki sync clone URL DIR [--name N] [--use]
+       wiki sync autosync [status|on|off] [--interval 分钟] [--identity auto|user|bot] [--name N]
        wiki prompt [--raw] [--full]   # 生成「宿主常驻要求」文本（贴进宿主的自定义指令/系统提示词）
 主题: wiki help [quickstart|files|agents|append|frontmatter|gate|bundle|sync|feishu|prompt]`)
       process.exit(cmd ? 1 : 0)

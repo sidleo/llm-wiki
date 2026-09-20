@@ -249,6 +249,9 @@ window.__ModuleLoader__.load({
 			const [cloneName, setCloneName] = react.default.useState("");
 			const [cloneUse, setCloneUse] = react.default.useState(false);
 			const [showClone, setShowClone] = react.default.useState(false);
+			const [autoInfo, setAutoInfo] = react.default.useState(null);
+			const [autoLoading, setAutoLoading] = react.default.useState(false);
+			const [autoInterval, setAutoInterval] = react.default.useState("5");
 			const run = react.default.useCallback(async (fn) => {
 				setBusy(true);
 				setErr("");
@@ -299,6 +302,25 @@ window.__ModuleLoader__.load({
 				viewBundle,
 				loadSync
 			]);
+			const loadAuto = react.default.useCallback(async () => {
+				setAutoLoading(true);
+				try {
+					const r = await api("/autosync");
+					setAutoInfo(r);
+				} catch (error) {
+					setErr(error && error.message ? error.message : String(error));
+				} finally {
+					setAutoLoading(false);
+				}
+			}, []);
+			react.default.useEffect(() => {
+				if (!open) return;
+				loadAuto();
+			}, [open, loadAuto]);
+			const autoRow = autoInfo && autoInfo.bundles ? autoInfo.bundles.find((b) => b.name === viewBundle) : null;
+			react.default.useEffect(() => {
+				if (autoRow) setAutoInterval(String(autoRow.intervalMinutes));
+			}, [autoRow && autoRow.name, autoRow && autoRow.intervalMinutes]);
 			const bundleNames = state ? state.entries.map((x) => x.name) : [];
 			const activeEntry = state ? state.entries.find((x) => x.name === viewBundle) : null;
 			const isFeishu = Boolean(activeEntry && activeEntry.kind === "feishu");
@@ -591,6 +613,71 @@ window.__ModuleLoader__.load({
 					await afterMutation("已克隆并登记");
 				})
 			}, "开始克隆")) : null)), e(Section, {
+				title: "定时自动同步",
+				hint: isFeishu ? "默认 5 分钟一次，在 DSH 进程内定时跑「推本地改动 + 拉远端改动」；冲突照旧停下报告、绝不覆盖。设置每台机器一份，保存在 ~/.agents/wiki-autosync.json。" : "只有飞书云盘库支持定时自动同步；本地目录库的 Git 远端同步涉及合并，需手动执行。"
+			}, !isFeishu ? e("div", { className: "dwHint" }, `当前目标「${viewBundle}」不是飞书云盘库。`) : e("div", null, autoLoading && !autoRow ? e("div", { className: "dwHint" }, "正在读取定时设置…") : null, autoRow ? e("div", null, e("label", { className: "dwCheck" }, e("input", {
+				type: "checkbox",
+				checked: autoRow.enabled === true,
+				disabled: busy,
+				onChange: (ev) => run(async () => {
+					await post("/autosync", {
+						op: "set",
+						bundle: viewBundle,
+						enabled: ev.target.checked
+					});
+					await loadAuto();
+					setNotice(ev.target.checked ? `已开启「${viewBundle}」定时同步` : `已关闭「${viewBundle}」定时同步`);
+				})
+			}), autoRow.enabled ? "已开启（本机定时自动同步）" : "已关闭"), e("div", { className: "dwGrid" }, e(Field, {
+				label: "间隔（分钟）",
+				type: "number",
+				value: autoInterval,
+				disabled: busy,
+				hint: "默认 5，最小 1，最大 1440",
+				onChange: setAutoInterval
+			}), e("label", { className: "dwField" }, e("span", { className: "dwLabel" }, "飞书身份"), e("select", {
+				className: "dwInput",
+				value: autoRow.identity || "auto",
+				disabled: busy,
+				onChange: (ev) => run(async () => {
+					await post("/autosync", {
+						op: "set",
+						bundle: viewBundle,
+						identity: ev.target.value
+					});
+					await loadAuto();
+					setNotice(`身份已设为 ${ev.target.value}`);
+				})
+			}, e("option", { value: "auto" }, "auto（谁可用用谁，user 优先）"), e("option", { value: "user" }, "user（我自己）"), e("option", { value: "bot" }, "bot（机器人）")), e("span", { className: "dwHint" }, autoInfo && autoInfo.lark && autoInfo.lark.ok ? `user ${autoInfo.lark.user && autoInfo.lark.user.ready ? "ready" : "不可用"}｜bot ${autoInfo.lark.bot && autoInfo.lark.bot.ready ? "ready" : "不可用"}` : "lark-cli 状态未知"))), e("div", { style: {
+				display: "flex",
+				gap: 8,
+				flexWrap: "wrap"
+			} }, e("button", {
+				className: "dwBtn dwBtnPrimary",
+				disabled: busy,
+				onClick: () => run(async () => {
+					const iv = Number(autoInterval);
+					await post("/autosync", {
+						op: "set",
+						bundle: viewBundle,
+						intervalMinutes: iv
+					});
+					await loadAuto();
+					setNotice(`间隔已设为 ${iv} 分钟`);
+				})
+			}, "保存间隔"), e("button", {
+				className: "dwBtn",
+				disabled: busy,
+				onClick: () => run(async () => {
+					const r = await post("/autosync", {
+						op: "run",
+						bundle: viewBundle
+					});
+					setNotice(`已同步：推送 ${(r.pushed || []).length}，拉取 ${(r.pulled || []).length}`);
+					await loadAuto();
+					await loadSync(viewBundle);
+				})
+			}, "立即同步一次")), autoRow.lastRunAt ? e("div", { className: autoRow.lastResult && autoRow.lastResult.ok ? "dwOk" : "dwWarn" }, `上次同步：${new Date(autoRow.lastRunAt).toLocaleString()}｜${autoRow.lastResult && autoRow.lastResult.ok ? `推送 ${autoRow.lastResult.pushed}，拉取 ${autoRow.lastResult.pulled}` : `失败：${autoRow.lastResult && autoRow.lastResult.error || "未知"}`}`) : e("div", { className: "dwHint" }, "尚未运行过"), autoRow.enabled && autoRow.nextRunAt ? e("div", { className: "dwHint" }, `下次预计：${new Date(autoRow.nextRunAt).toLocaleString()}`) : null) : e("div", { className: "dwHint" }, autoLoading ? "正在读取…" : "（未读取到定时设置，点上方「刷新状态」重试）"))), e(Section, {
 				title: "体检与索引",
 				hint: "只读校验 + 显式重建 index.md（派生文件）。"
 			}, e("div", { style: {

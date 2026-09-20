@@ -109,9 +109,16 @@ wiki sync init --folder-token https://feishu.cn/drive/folder/fldcnXXXX --name fe
 # Daily
 wiki sync status          # to-push / to-pull / changed-on-both / deleted-remotely
 wiki sync                 # push local changes + pull remote changes (only changed files)
+
+# Scheduled auto-sync (interval/identity per machine; timer runs inside the DSH plugin)
+wiki sync autosync status|on|off [--interval 5] [--identity auto|user|bot]
 ```
 
-Three-way state lives in the cache's `.wiki-cloud.json` (fileToken, remote `modified_time`, local mtime/size): one-sided changes transfer, two-sided changes stop the sync with a conflict list. A pull that overwrites a local file backs it up under `.backup/<timestamp>/` first. Requires a logged-in `lark-cli` (`lark-cli auth login`); see `wiki help feishu`.
+Three-way state lives in the cache's `.wiki-cloud.json` (fileToken, remote `modified_time`, local mtime/size): one-sided changes transfer, two-sided changes stop the sync with a conflict list. A pull that overwrites a local file backs it up under `.backup/<timestamp>/` first. Requires `lark-cli` (`lark-cli auth login`, or a bot identity with scopes + folder access); see `wiki help feishu`.
+
+**Identity is auto-selected.** Every action reads the identity state from `lark-cli auth status` once (never a probe read/write against the remote) and picks: `auto` (default — user if ready, else bot), or a pinned `user`/`bot` that errors instead of falling back. Note that a bot's permissions come from the app: private "My Space" folders are usually unreachable for it, so `auto` normally resolves to `user`.
+
+**Scheduled auto-sync** (off by default) stores its switch/interval/identity per machine in `~/.agents/wiki-autosync.json` — default interval **5 minutes** (min 1, max 1440). The timer lives in the DSH plugin's host process (so it stops when DSH stops; use a system scheduler to run `wiki sync` otherwise) and only ever drives **Feishu** bundles, since Git remote sync involves merges that should stay manual. One bundle never runs concurrently, a failure is recorded rather than fatal, and conflicts still stop and report without overwriting either side.
 
 ### Graphical configuration (DSH Web GUI)
 
@@ -122,6 +129,7 @@ Settings → Plugins → Plugin configuration → llm-wiki card (the host render
 | Named directories | add / rename / remove / set default | `~/.agents/wiki-registry.json` (shared with CLI/pi; removal only unregisters, never deletes) |
 | Online sync | backend-aware: Git (remote/branch/ahead-behind) or Feishu (to-push/to-pull/conflicts/folder link) + sync / pull / push / init / clone | core `git.mjs` / `feishu.mjs`, the same implementation as `wiki_sync` |
 | Named directories | add as **local path** or **Feishu cloud drive** (one click to create the folder in Feishu and register it) | `~/.agents/wiki-registry.json` (Feishu entries are objects: kind/folderToken/cacheDir) |
+| Scheduled auto-sync | on/off, interval (default 5 min), identity, plus "sync now" and last-run status | `~/.agents/wiki-autosync.json` (per machine), driven by the plugin's in-host timer |
 | Health & index | validate/lint counts and details, rebuild index | core `validateBundle` / `lintBundle` / `refreshIndex` |
 
 (Runtime parameters are not in the card: data dir, injection section name/order, limits and cache TTL are deployment-level and live in the profile's `cordis.patch.yml`.)
@@ -169,10 +177,11 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 
 ```bash
 node scripts/smoke-test.mjs              # 36 checks: core tool chain + registry + ingest/lint end-to-end
-node tests/dsh-mock-test.mjs             # 33 checks: DSH plugin (mock host) tools + injection layers + gates + multi-bundle + sync
-node --test tests/dsh-config-test.mjs    # 9 checks: config card host half (settings namespace + /api/dsh-wiki/* routes)
+node tests/dsh-mock-test.mjs             # 35 checks: DSH plugin (mock host) tools + injection layers + gates + multi-bundle + sync
+node --test tests/dsh-config-test.mjs    # 14 checks: config card host half (settings namespace + /api/dsh-wiki/* routes, incl. handler execution)
 node --test tests/git-sync.test.mjs      # 8 checks: Git remote sync (sequential writes / concurrent log / index / concept conflicts)
-node --test tests/feishu-backend.test.mjs # 12 checks: Feishu cloud-drive backend (3-way diff, changed-files-only, conflict stop, log union, argv safety)
+node --test tests/feishu-backend.test.mjs # 25 checks: Feishu cloud-drive backend (3-way diff, changed-files-only, conflict stop, log union, argv safety, user/bot identity selection)
+node --test tests/autosync.test.mjs      # 17 checks: scheduled auto-sync (config persistence, interval/identity clamping, run recording, scheduler + conflict safety)
 node --test tests/dsh-client-bundle-test.mjs   # 5 checks: card bundle contract + jsdom render smoke
 (cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 checks: pi extension (mock pi)
 (cd packages/mcp && npm install && npm test)   # 17 checks: MCP form (SDK stdio client end-to-end + tool/output parity with the DSH plugin + stdout purity)

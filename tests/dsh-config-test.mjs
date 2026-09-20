@@ -148,6 +148,7 @@ describe('DSH 插件配置卡片（宿主半）', () => {
       '/api/dsh-wiki/health',
       '/api/dsh-wiki/index',
       '/api/dsh-wiki/sync',
+      '/api/dsh-wiki/autosync',
     ]) {
       assert.ok(routes.has(key), `缺少路由 ${key}`)
     }
@@ -162,6 +163,30 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     const used = new Set([...rels].map((r) => base + r))
     for (const p of used) assert.ok(routes.has(p), `卡片调用了未注册的路由 ${p}`)
     for (const p of routes.keys()) assert.ok(used.has(p), `宿主注册了卡片没用到的路由 ${p}`)
+  })
+
+  test('GET /autosync：handler 真能跑起来（防「路由已注册但 handler 引用未定义变量」）', async () => {
+    // 这类 bug 注册阶段完全看不出来（routes.has 为真），只有真调一次才暴露：
+    // 曾经 autosync 只在 apply 里定义、没进 registerWebRoutes 的 deps，访问即 500。
+    const r = await callRoute(route('/api/dsh-wiki/autosync'))
+    assert.notEqual(r.status, 500, `路由抛异常：${JSON.stringify(r.body)}`)
+    assert.equal(r.body.ok, true, JSON.stringify(r.body))
+    assert.ok(Array.isArray(r.body.bundles), 'status 应给出 bundles 数组')
+    assert.ok(r.body.file, 'status 应给出设置文件路径')
+  })
+
+  test('POST /autosync：set 能写开关/间隔/身份，run 对非飞书 bundle 明确报错', async () => {
+    await core.writeRegistry({ bundles: { demo }, active: 'demo' })
+    const set = await callRoute(route('/api/dsh-wiki/autosync'), { method: 'POST', body: { op: 'set', bundle: 'demo', enabled: true, intervalMinutes: 9, identity: 'user' } })
+    assert.equal(set.body.ok, true, JSON.stringify(set.body))
+    const s = await core.autosyncSettingsFor('demo')
+    assert.equal(s.enabled, true)
+    assert.equal(s.intervalMinutes, 9)
+    assert.equal(s.identity, 'user')
+
+    const run = await callRoute(route('/api/dsh-wiki/autosync'), { method: 'POST', body: { op: 'run', bundle: 'demo' } })
+    assert.equal(run.body.ok, false, 'demo 是本地目录 bundle，定时同步只支持飞书后端')
+    assert.match(String(run.body.error), /不是飞书后端/)
   })
 
   test('GET /state：注册表 ∪ 部署声明（同名配置优先并标 shadowed）', async () => {

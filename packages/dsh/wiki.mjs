@@ -43,7 +43,7 @@ export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
 /** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.4.15'
+const PLUGIN_VERSION = '0.5.0'
 
 /** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
 const SETTINGS_NS = 'dsh-wiki'
@@ -259,7 +259,7 @@ function formatGitResult(action, r) {
  * 卡片（lib/client.js）只跟这些端点对话：命名 bundle 管理 / 参数 / 体检 / index / 在线同步。
  */
 function registerWebRoutes(ctx, deps) {
-  const { effectiveConfig, loadCore, invalidateCaches } = deps
+  const { effectiveConfig, loadCore, invalidateCaches, autosync } = deps
   const webServer = ctx.get('webServer')
   if (!webServer || typeof webServer.register !== 'function') return
 
@@ -482,6 +482,39 @@ function registerWebRoutes(ctx, deps) {
 
   // GET/POST /api/dsh-wiki/sync —— 在线同步（按 bundle 后端分派：git 仓库 / 飞书云盘库）
   // （同一路径只能注册一条路由：宿主按路径匹配，handler 内自行按 method 分派）
+  // —— 定时自动同步（配置在 ~/.agents/wiki-autosync.json；定时器在插件内跑）——
+  route('/api/dsh-wiki/autosync', async (req, res) => {
+    try {
+      const c = await loadCore()
+      const method = String((req && req.method) || 'GET').toUpperCase()
+      if (method === 'GET') {
+        const st = await autosync.status()
+        const lark = await c.larkAvailable().catch(() => null)
+        return jsonResponse(res, { ...st, lark })
+      }
+      const body = await readJsonBody(req)
+      const op = String(body.op || 'set')
+      const name = String(body.bundle || '')
+      if (!name) return jsonResponse(res, { ok: false, error: '需要 bundle 名' }, 400)
+
+      if (op === 'set') {
+        const saved = await c.setAutosyncSettings(name, {
+          ...(body.enabled !== undefined ? { enabled: body.enabled === true } : {}),
+          ...(body.intervalMinutes !== undefined ? { intervalMinutes: body.intervalMinutes } : {}),
+          ...(body.identity !== undefined ? { identity: body.identity } : {}),
+        })
+        return jsonResponse(res, { ok: true, bundle: name, settings: saved })
+      }
+      if (op === 'run') {
+        const r = await autosync.runNow(name)
+        return jsonResponse(res, { ...r, bundle: name }, r.ok ? 200 : 409)
+      }
+      return jsonResponse(res, { ok: false, error: `未知操作：${op}（可用 set / run）` }, 400)
+    } catch (e) {
+      jsonResponse(res, { ok: false, error: e && e.message ? e.message : String(e) }, 400)
+    }
+  })
+
   route('/api/dsh-wiki/sync', async (req, res) => {
     try {
       const c = await loadCore()
@@ -491,8 +524,9 @@ function registerWebRoutes(ctx, deps) {
       if (method === 'GET') {
         const url = new URL(req.url || '/', 'http://localhost')
         const t = await target(c, url.searchParams.get('bundle'))
+        const identity = url.searchParams.get('identity') || 'auto'
         if (isFeishu(t)) {
-          const feishu = await c.feishuStatus(t)
+          const feishu = await c.feishuStatus(t, { identity })
           return jsonResponse(res, { ok: true, bundle: t, backend: 'feishu', feishu, url: t.decl && t.decl.folderToken ? c.feishuFolderUrl(t.decl.folderToken) : '' })
         }
         return jsonResponse(res, { ok: true, bundle: t, backend: 'git', git: await c.gitStatus(t.path) })
@@ -500,10 +534,11 @@ function registerWebRoutes(ctx, deps) {
 
       const body = await readJsonBody(req)
       const op = String(body.op || 'sync')
+      const identity = body.identity || 'auto'
 
       // 飞书后端初始化：新建/挂载云盘文件夹 + 注册命名 bundle（再首推由 op=sync 完成）
       if (op === 'feishu-init') {
-        const r = await c.feishuInit({ name: body.name, folderToken: body.folderToken, newFolder: body.newFolder, cacheDir: body.cacheDir, label: body.label, use: body.use === true })
+        const r = await c.feishuInit({ name: body.name, folderToken: body.folderToken, newFolder: body.newFolder, cacheDir: body.cacheDir, label: body.label, use: body.use === true }, { identity })
         invalidateCaches()
         return jsonResponse(res, r, r.ok ? 200 : 400)
       }
@@ -524,25 +559,25 @@ function registerWebRoutes(ctx, deps) {
           return jsonResponse(res, { ...r, bundle: t, backend: 'feishu' }, r.ok ? 200 : 400)
         }
         if (op === 'pull') {
-          const before = await c.feishuStatus(t)
+          const before = await c.feishuStatus(t, { identity })
           if (!before.ok) return jsonResponse(res, before, 400)
           const paths = before.pull.map((x) => x.rel)
-          const r = await c.feishuPull(t, { paths })
+          const r = await c.feishuPull(t, { paths, identity })
           invalidateCaches()
           return jsonResponse(res, { ...r, bundle: t, files: paths.length }, r.ok ? 200 : 409)
         }
         if (op === 'push') {
-          const before = await c.feishuStatus(t)
+          const before = await c.feishuStatus(t, { identity })
           if (!before.ok) return jsonResponse(res, before, 400)
           if (before.conflict.length) {
             return jsonResponse(res, { ok: false, step: 'conflict', conflicts: before.conflict.map((x) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: '请先人工处理冲突（飞书或本地任选一侧）再重跑。' }, 409)
           }
-          const r = await c.feishuPush(t, { paths: before.push.map((x) => x.rel) })
+          const r = await c.feishuPush(t, { paths: before.push.map((x) => x.rel), identity })
           invalidateCaches()
           return jsonResponse(res, { ...r, bundle: t }, r.ok ? 200 : 409)
         }
         if (op === 'sync') {
-          const r = await c.feishuSync(t, { adopt: body.adopt, message: body.message })
+          const r = await c.feishuSync(t, { adopt: body.adopt, message: body.message, identity })
           invalidateCaches()
           return jsonResponse(res, { ...r, bundle: t, backend: 'feishu' }, r.ok ? 200 : 409)
         }
@@ -564,6 +599,140 @@ function registerWebRoutes(ctx, deps) {
       jsonResponse(res, { ok: false, error: e && e.message ? e.message : String(e) }, 400)
     }
   })
+}
+
+/**
+ * 创建定时自动同步控制器（宿主内定时器）。导出供测试直接驱动；
+ * 正常路径由 apply 内部创建并 start()。
+ *
+ * 设计要点：
+ * - **只跑飞书后端**：本地目录 bundle 的远端同步要处理合并/冲突，不适合无人值守自动跑；
+ *   这里只对 kind:'feishu' 的 bundle 做「推本地改动 + 拉远端改动」（core 自己的三方状态判定，
+ *   冲突仍会停下并只报告，绝不覆盖）。
+ * - **只动「需要同步」的 bundle**：每次 tick 重新读配置（卡片改完即时生效，无需重启）。
+ * - **不并发**：同一 bundle 上一轮没跑完就跳过本轮；进程被杀留下的 runningSince 超过
+ *   2 倍间隔 + 1 分钟视为陈旧自动接管。
+ * - **失败不抛**：结果写回配置文件（lastRunAt/lastResult），卡片显示「上次同步」。
+ *   定时器本身绝不因为一次同步失败而停掉——授权缺失是常态，恢复了就继续。
+ * - **unref**：定时器不阻止进程退出。
+ */
+export function createAutosync({ loadCore, effectiveConfig, invalidateCaches }) {
+  const TICK_MS = 30_000 // 每 30s 检查一次到点与否（对 5 分钟间隔足够精细，且开销可忽略）
+  let timer = null
+  let ticking = false
+  let lastTickAt = new Map() // bundle 名 → 上次执行的 ms
+
+  /** 当前注册表里所有飞书 bundle（名字 + 解析后的 spec）。 */
+  async function feishuBundles(c) {
+    const cfg = effectiveConfig()
+    const reg = await c.readRegistry()
+    const declared = cfg.dataDirs && typeof cfg.dataDirs === 'object' ? cfg.dataDirs : {}
+    const names = [...new Set([...Object.keys(reg.bundles || {}), ...Object.keys(declared)])]
+    const out = []
+    for (const name of names) {
+      const resolved = await c.resolveBundleRoot(cfg, { name })
+      if (resolved && resolved.kind === 'feishu') out.push({ name, spec: resolved })
+    }
+    return out
+  }
+
+  /** 跑一个 bundle 的自动同步（含并发/陈旧判定与结果回写）。 */
+  async function runOne(c, entry, settings) {
+    const now = Date.now()
+    if (settings.runningSince && !c.isStaleRunning(settings.runningSince, settings.intervalMinutes, now)) return { skipped: 'running' }
+    const last = lastTickAt.get(entry.name) || 0
+    if (now - last < settings.intervalMinutes * 60_000 - 5_000) return { skipped: 'not-due' }
+    lastTickAt.set(entry.name, now)
+    await c.markAutosyncRunning(entry.name, true)
+    try {
+      const r = await c.feishuSync(entry.spec, { identity: settings.identity })
+      await c.recordAutosyncRun(entry.name, r)
+      if (r.ok) invalidateCaches()
+      return r
+    } catch (e) {
+      const r = { ok: false, error: e && e.message ? e.message : String(e) }
+      await c.recordAutosyncRun(entry.name, r)
+      return r
+    } finally {
+      await c.markAutosyncRunning(entry.name, false).catch(() => {})
+    }
+  }
+
+  /** 一轮检查：读配置 → 对每个「已开启且到点」的飞书 bundle 跑同步。 */
+  async function tick() {
+    if (ticking) return
+    ticking = true
+    try {
+      const c = await loadCore()
+      const bundles = await feishuBundles(c)
+      for (const entry of bundles) {
+        const settings = await c.autosyncSettingsFor(entry.name)
+        if (!settings.enabled) continue
+        await runOne(c, entry, settings)
+      }
+    } catch {
+      // 定时器不因单轮异常退出
+    } finally {
+      ticking = false
+    }
+  }
+
+  /** 立即跑一次（卡片「立即同步」按钮；不看间隔，但尊重并发锁）。 */
+  async function runNow(name) {
+    const c = await loadCore()
+    const cfg = effectiveConfig()
+    const resolved = await c.resolveBundleRoot(cfg, { name })
+    if (!resolved || resolved.kind !== 'feishu') return { ok: false, error: `「${name}」不是飞书后端 bundle（定时同步只支持飞书云盘库）` }
+    const settings = await c.autosyncSettingsFor(name)
+    await c.markAutosyncRunning(name, true)
+    try {
+      const r = await c.feishuSync(resolved, { identity: settings.identity })
+      await c.recordAutosyncRun(name, r)
+      if (r.ok) invalidateCaches()
+      lastTickAt.set(name, Date.now())
+      return r
+    } catch (e) {
+      const r = { ok: false, error: e && e.message ? e.message : String(e) }
+      await c.recordAutosyncRun(name, r)
+      return r
+    } finally {
+      await c.markAutosyncRunning(name, false).catch(() => {})
+    }
+  }
+
+  /** 状态汇总（卡片用）：每个飞书 bundle 的设置 + 上次结果 + 下次预计时间。 */
+  async function status() {
+    const c = await loadCore()
+    const bundles = await feishuBundles(c)
+    const rows = []
+    for (const entry of bundles) {
+      const settings = await c.autosyncSettingsFor(entry.name)
+      const last = lastTickAt.get(entry.name) || null
+      rows.push({
+        name: entry.name,
+        ...settings,
+        nextRunAt: settings.enabled && last ? new Date(last + settings.intervalMinutes * 60_000).toISOString() : null,
+      })
+    }
+    return { ok: true, file: c.autosyncFile(), running: Boolean(timer), tickSeconds: TICK_MS / 1000, bundles: rows }
+  }
+
+  function start(ctx) {
+    if (timer) return
+    timer = setInterval(() => void tick(), TICK_MS)
+    if (typeof timer.unref === 'function') timer.unref()
+    // 宿主启动 20s 后先跑一轮（避开启动风暴；未开启的 bundle 会被跳过）
+    const warm = setTimeout(() => void tick(), 20_000)
+    if (typeof warm.unref === 'function') warm.unref()
+  }
+
+  function stop() {
+    if (!timer) return
+    clearInterval(timer)
+    timer = null
+  }
+
+  return { start, stop, tick, runNow, status, get running() { return Boolean(timer) } }
 }
 
 export function apply(ctx, config) {
@@ -739,6 +908,9 @@ export function apply(ctx, config) {
     }
   }
 
+  // —— 定时自动同步控制器（配置读写走 core，定时器在本插件内）——
+  const autosync = createAutosync({ loadCore, effectiveConfig, invalidateCaches })
+
   // —— 设置命名空间（可选服务）：只作为「插件配置卡片」的可见性钥匙 ——
   // DSH 的插件配置 Tab 只渲染「宿主已服务命名空间 ∩ 已注册卡片」，卡片 key = 本命名空间。
   // 运行参数不在这里配置（schema 为空）：部署级参数改 profile 的 cordis.patch.yml。
@@ -759,7 +931,12 @@ export function apply(ctx, config) {
 
   // —— 图形化配置 RPC（可选服务 webServer；非 web 部署不注册）——
   ctx.inject(['webServer'], (webCtx) => {
-    registerWebRoutes(webCtx, { effectiveConfig, loadCore, invalidateCaches })
+    registerWebRoutes(webCtx, { effectiveConfig, loadCore, invalidateCaches, autosync })
+  })
+
+  // —— 定时自动同步（本插件内跑；配置在 ~/.agents/wiki-autosync.json）——
+  ctx.inject(['tools'], (syncCtx) => {
+    autosync.start(syncCtx)
   })
 
   // —— wiki_list ——
@@ -1159,7 +1336,7 @@ export function apply(ctx, config) {
       '· 本地目录 bundle → Git 远端：status 看远端/分支/ahead-behind/脏文件/冲突；sync 提交+拉取合并+推送；init 挂远端并首推；clone 克隆远端。',
       '· 飞书 bundle（云盘文件夹存原生 .md）→ lark-cli：status 看待推送/待拉取/两侧都改/远端已删；sync 推本地改动+拉远端改动；pull/push 单向；init 新建或挂载云盘文件夹并注册命名 bundle。',
       '冲突策略（两种后端一致）：index.md 本地重生成、log.md 取并集 → 永不阻塞；概念/AGENTS.md 两侧都改会停止同步并报清单，绝不 force/覆盖；飞书后端永不删除两端文件（删除只报告）。',
-      '凭证与认证：git 交给 git；飞书交给 lark-cli（user 身份）。详见 wiki_help sync / wiki_help feishu。',
+      '凭证与认证：git 交给 git；飞书交给 lark-cli，身份自动选择（user 优先，user 不可用则回退 bot）——可用 identity 参数锁定。详见 wiki_help sync / wiki_help feishu。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -1172,6 +1349,7 @@ export function apply(ctx, config) {
         new_folder: { type: 'string', description: 'init（飞书）：在我的空间新建同名文件夹（与 folder_token 二选一）' },
         cache_dir: { type: 'string', description: 'init（飞书）：本地缓存目录（缺省 ~/.agents/wiki-cloud/<名字>）' },
         adopt: { type: 'string', description: '飞书首次同步的裁决：local=以本地为准推送，remote=以远端为准拉取（缺省 local）', enum: ['local', 'remote'] },
+        identity: { type: 'string', description: '飞书 lark-cli 身份：auto=谁可用用谁（缺省，user 优先）；user/bot=锁定该身份（不可用即报错，不回退）', enum: ['auto', 'user', 'bot'] },
         url: { type: 'string', description: 'clone：远端 URL' },
         dir: { type: 'string', description: 'clone：本地目标目录（须不存在或为空）' },
         name: { type: 'string', description: 'init/clone：同时注册为命名 bundle（三形态共享注册表）' },
@@ -1196,7 +1374,7 @@ export function apply(ctx, config) {
 
         // 飞书初始化：新建/挂载云盘文件夹（与 git init 并列的入口）
         if (action === 'init' && (args.folder_token || args.new_folder)) {
-          const r = await c.feishuInit({ name: args.name, folderToken: args.folder_token, newFolder: args.new_folder, cacheDir: args.cache_dir, use: args.use === true })
+          const r = await c.feishuInit({ name: args.name, folderToken: args.folder_token, newFolder: args.new_folder, cacheDir: args.cache_dir, use: args.use === true }, { identity: args.identity || 'auto' })
           invalidateCaches()
           return { text: formatFeishuResult('init', r) }
         }
@@ -1206,29 +1384,31 @@ export function apply(ctx, config) {
           : await resolveActive(agent)
         const isFeishu = active.kind === 'feishu'
 
+        const identity = args.identity || 'auto'
+
         if (action === 'status') {
-          return { text: isFeishu ? formatFeishuResult('status', await c.feishuStatus(active)) : formatGitResult('status', await c.gitStatus(active.path)) }
+          return { text: isFeishu ? formatFeishuResult('status', await c.feishuStatus(active, { identity })) : formatGitResult('status', await c.gitStatus(active.path)) }
         }
         if (isFeishu) {
           if (action === 'pull') {
-            const before = await c.feishuStatus(active)
+            const before = await c.feishuStatus(active, { identity })
             if (!before.ok) return { text: formatFeishuResult('pull', before) }
-            const r = await c.feishuPull(active, { paths: before.pull.map((x) => x.rel) })
+            const r = await c.feishuPull(active, { paths: before.pull.map((x) => x.rel), identity })
             invalidateCaches()
             return { text: formatFeishuResult('pull', { ...r, bundle: active, files: before.pull.length }) }
           }
           if (action === 'push') {
-            const before = await c.feishuStatus(active)
+            const before = await c.feishuStatus(active, { identity })
             if (!before.ok) return { text: formatFeishuResult('push', before) }
             if (before.conflict.length) {
               return { text: formatFeishuResult('push', { ok: false, step: 'conflict', conflicts: before.conflict.map((x) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: '请先人工处理冲突（飞书或本地任选一侧）再重跑。' }) }
             }
-            const r = await c.feishuPush(active, { paths: before.push.map((x) => x.rel) })
+            const r = await c.feishuPush(active, { paths: before.push.map((x) => x.rel), identity })
             invalidateCaches()
             return { text: formatFeishuResult('push', { ...r, bundle: active }) }
           }
           if (action === 'sync') {
-            const r = await c.feishuSync(active, { adopt: args.adopt, message: args.message })
+            const r = await c.feishuSync(active, { adopt: args.adopt, message: args.message, identity })
             invalidateCaches()
             if (r.ok) clearSession(agent)
             return { text: formatFeishuResult('sync', { ...r, bundle: active }) }

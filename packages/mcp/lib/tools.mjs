@@ -473,7 +473,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
       '· 本地目录 bundle → Git 远端：status 看远端/分支/ahead-behind/脏文件/冲突；sync 提交+拉取合并+推送；init 挂远端并首推；clone 克隆远端。',
       '· 飞书 bundle（云盘文件夹存原生 .md）→ lark-cli：status 看待推送/待拉取/两侧都改/远端已删；sync 推本地改动+拉远端改动；pull/push 单向；init 新建或挂载云盘文件夹并注册命名 bundle。',
       '冲突策略（两种后端一致）：index.md 本地重生成、log.md 取并集 → 永不阻塞；概念/AGENTS.md 两侧都改会停止同步并报清单，绝不 force/覆盖；飞书后端永不删除两端文件（删除只报告）。',
-      '凭证与认证：git 交给 git；飞书交给 lark-cli（user 身份）。详见 wiki_help sync / wiki_help feishu。',
+      '凭证与认证：git 交给 git；飞书交给 lark-cli，身份自动选择（user 优先，user 不可用则回退 bot）——可用 identity 参数锁定。详见 wiki_help sync / wiki_help feishu。',
     ],
     {
       type: 'object',
@@ -486,6 +486,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
         new_folder: { type: 'string', description: 'init（飞书）：在我的空间新建同名文件夹（与 folder_token 二选一）' },
         cache_dir: { type: 'string', description: 'init（飞书）：本地缓存目录（缺省 ~/.agents/wiki-cloud/<名字>）' },
         adopt: { type: 'string', description: '飞书首次同步的裁决：local=以本地为准推送，remote=以远端为准拉取（缺省 local）', enum: ['local', 'remote'] },
+        identity: { type: 'string', description: '飞书 lark-cli 身份：auto=谁可用用谁（缺省，user 优先）；user/bot=锁定该身份（不可用即报错，不回退）', enum: ['auto', 'user', 'bot'] },
         url: { type: 'string', description: 'clone：远端 URL' },
         dir: { type: 'string', description: 'clone：本地目标目录（须不存在或为空）' },
         name: { type: 'string', description: 'init/clone：同时注册为命名 bundle（各形态共享注册表）' },
@@ -507,7 +508,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
 
         // 飞书初始化：新建/挂载云盘文件夹（与 git init 并列的入口）
         if (action === 'init' && (args.folder_token || args.new_folder)) {
-          const r = await core.feishuInit({ name: args.name, folderToken: args.folder_token, newFolder: args.new_folder, cacheDir: args.cache_dir, use: args.use === true })
+          const r = await core.feishuInit({ name: args.name, folderToken: args.folder_token, newFolder: args.new_folder, cacheDir: args.cache_dir, use: args.use === true }, { identity: args.identity || 'auto' })
           invalidateCaches()
           return { text: formatFeishuResult('init', r) }
         }
@@ -516,30 +517,31 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
           ? await core.resolveBundleRoot(config, { name: String(args.bundle) })
           : await resolveActive()
         const isFeishu = active.kind === 'feishu'
+        const identity = args.identity || 'auto'
 
         if (action === 'status') {
-          return { text: isFeishu ? formatFeishuResult('status', await core.feishuStatus(active)) : formatGitResult('status', await core.gitStatus(active.path)) }
+          return { text: isFeishu ? formatFeishuResult('status', await core.feishuStatus(active, { identity })) : formatGitResult('status', await core.gitStatus(active.path)) }
         }
         if (isFeishu) {
           if (action === 'pull') {
-            const before = await core.feishuStatus(active)
+            const before = await core.feishuStatus(active, { identity })
             if (!before.ok) return { text: formatFeishuResult('pull', before) }
-            const r = await core.feishuPull(active, { paths: before.pull.map((x) => x.rel) })
+            const r = await core.feishuPull(active, { paths: before.pull.map((x) => x.rel), identity })
             invalidateCaches()
             return { text: formatFeishuResult('pull', { ...r, bundle: active, files: before.pull.length }) }
           }
           if (action === 'push') {
-            const before = await core.feishuStatus(active)
+            const before = await core.feishuStatus(active, { identity })
             if (!before.ok) return { text: formatFeishuResult('push', before) }
             if (before.conflict.length) {
               return { text: formatFeishuResult('push', { ok: false, step: 'conflict', conflicts: before.conflict.map((x) => x.rel), error: `${before.conflict.length} 个文件两侧都改过`, next: '请先人工处理冲突（飞书或本地任选一侧）再重跑。' }) }
             }
-            const r = await core.feishuPush(active, { paths: before.push.map((x) => x.rel) })
+            const r = await core.feishuPush(active, { paths: before.push.map((x) => x.rel), identity })
             invalidateCaches()
             return { text: formatFeishuResult('push', { ...r, bundle: active }) }
           }
           if (action === 'sync') {
-            const r = await core.feishuSync(active, { adopt: args.adopt, message: args.message })
+            const r = await core.feishuSync(active, { adopt: args.adopt, message: args.message, identity })
             invalidateCaches()
             if (r.ok) clearOverride()
             return { text: formatFeishuResult('sync', { ...r, bundle: active }) }

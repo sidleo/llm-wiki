@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 0.4.15
+version: 0.5.0
 description: >-
   工作知识库（OKF v0.2 markdown bundle，用 `wiki` CLI 读写）：收录某个团队/领域**反复要用到的知识**
   ——事实与结构、约定与口径、流程与规范、经验与坑点。**以下情况先用本 skill 查库，不要凭记忆或印象回答**：
@@ -110,6 +110,7 @@ metadata:
 | `wiki sync init --new-folder 名称 --name N [--cache-dir D] [--use]` | 在飞书「我的空间」新建文件夹并注册为在线库（原生 .md） |
 | `wiki sync init --folder-token URL\|TOKEN --name N` | 挂载已有飞书文件夹（另一台机器/多人共享） |
 | `wiki sync clone URL DIR [--name N] [--use]` | 克隆 Git 远端知识库到本地并注册 |
+| `wiki sync autosync [status\|on\|off] [--interval 分钟] [--identity auto\|user\|bot] [--name N]` | 定时自动同步的开关/间隔（默认 5 分钟）与飞书身份；只读写每台机器一份的 `~/.agents/wiki-autosync.json`，**常驻定时器由 DSH 插件跑**（CLI 不做常驻） |
 | `wiki help [主题]` | 查机制文档：quickstart｜files｜agents（怎么写 AGENTS.md）｜append（怎么写 APPEND_SYSTEM_PROMPT.md）｜frontmatter｜gate｜bundle｜sync（在线同步与冲突策略） |
 
 想给某分类加行为规则 → 在该目录新建 `APPEND_SYSTEM_PROMPT.md`（正文即追加进 system prompt 的行为引导，写法见 `wiki help append`）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节（写法见 `wiki help agents`）。

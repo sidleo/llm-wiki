@@ -13,8 +13,10 @@
  *   拉取覆盖本地前先备份到 `.backup/<时间戳>/`。认证完全交给 lark-cli，不落任何 token。
  * - 冲突不静默：概念/AGENTS.md 双侧都改 → 停止同步并报清单；`index.md` 本地重生成、
  *   `log.md` 用 mergeLogText 取并集（与 git 同步同一套规则）。
+ * - **身份可自动选择**：每次动作前按 `identity` 选项（auto 默认 | user | bot）探测 lark-cli
+ *   身份态，可用者执行；身份只从探测结果取「该身份是否 ready」，不做任何真实读写试探。
  *
- * 依赖：`lark-cli`（user 身份，可由 `WIKI_LARK_BIN` 覆盖路径，测试用假桩）。
+ * 依赖：`lark-cli`（身份 user/bot 自选，路径可由 `WIKI_LARK_BIN` 覆盖，测试用假桩）。
  */
 
 import { execFile } from 'node:child_process'
@@ -108,8 +110,11 @@ function unwrap(res) {
 }
 
 function hintFor(msg = '') {
+  if (/app_scope_not_applied|has not applied for the required scope/i.test(msg)) {
+    return '飞书应用未申请该接口所需 scope：按报错里的控制台链接申请（云文档需 drive:drive、space:document:retrieve、docs:document.*），发布后重试；或改用 identity: user（你自己的权限通常已覆盖）。'
+  }
   if (/scope|permission denied|forbidden/i.test(msg)) return '飞书授权缺少 scope：执行 lark-cli auth login 补齐（drive / markdown / wiki 读写）。'
-  if (/auth|token|login|unauthor/i.test(msg)) return '飞书身份不可用：执行 lark-cli auth login（user 身份）。'
+  if (/auth|token|login|unauthor/i.test(msg)) return '飞书身份不可用：执行 lark-cli auth login（user 身份），或改用 identity: bot。'
   if (/rate_limit|too many/i.test(msg)) return '触发飞书限流：稍后重试。'
   return undefined
 }
@@ -167,7 +172,10 @@ async function writeIndex(cacheDir, idx) {
   await writeFile(join(cacheDir, CLOUD_INDEX_FILE), JSON.stringify({ ...idx, updatedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8')
 }
 
-/** lark-cli 是否可用（含 user 身份状态）。 */
+/** 身份类型（lark-cli --as 取值）。 */
+export const LARK_IDENTITIES = ['user', 'bot']
+
+/** lark-cli 是否可用（列出 user/bot 两个身份的 ready 状态，不做任何真实读写试探）。 */
 export async function larkAvailable(opts = {}) {
   // 注意：lark-cli auth status 不接受 --format（本身就输出 JSON）
   const res = await runLark(['auth', 'status'], opts)
@@ -187,6 +195,54 @@ export async function larkAvailable(opts = {}) {
   }
 }
 
+/** 身份态 → 可读摘要（给状态/报错文本用）。 */
+function identitySummary(avail) {
+  if (!avail || !avail.ok) return []
+  const out = []
+  if (avail.user) out.push(`user ${avail.user.ready ? 'ready' : `不可用（${avail.user.status || 'unknown'}）`}${avail.user.userName ? `：${avail.user.userName}` : ''}`)
+  if (avail.bot) out.push(`bot ${avail.bot.ready ? 'ready' : `不可用（${avail.bot.status || 'unknown'}）`}`)
+  return out
+}
+
+/** 指定身份不可用时的落地方案（bot 与 user 的原因不同，分开给）。 */
+function identityHint(identity, avail) {
+  const other = identity === 'user' ? 'bot' : 'user'
+  const otherReady = avail && avail.ok && avail[other] && avail[other].ready
+  if (identity === 'bot') {
+    return otherReady
+      ? '飞书 bot 身份不可用：改用 identity: auto/user 走 user 身份。'
+      : '飞书 bot 身份不可用：应用需在开发者后台申请云文档权限（drive:drive、space:document:retrieve、docs:document.*）并发布版本；私有云盘文件夹还要把机器人加为协作者。'
+  }
+  return otherReady
+    ? '飞书 user 身份不可用（token 过期/未登录）：执行 lark-cli auth login 续期，或用 identity: auto/bot 走 bot 身份。'
+    : '飞书 user 身份不可用：执行 lark-cli auth login（user 身份）后再试。'
+}
+
+/**
+ * 本次动作使用的身份：解析 identity 选项（auto 默认 | user | bot）并校验其可用性。
+ * 只读 auth status 的 ready 标记，绝不为了「试试看」而读写远端。
+ * @returns {Promise<{ok:true, identity:'user'|'bot', as:string[], avail?:object, summary?:string[]}|{ok:false, error:string, next?:string, identities?:string[]}>}
+ */
+export async function resolveLarkIdentity(opts = {}) {
+  const want = String(opts.identity || 'auto').toLowerCase()
+  if (!['auto', ...LARK_IDENTITIES].includes(want)) {
+    return { ok: false, error: `未知的 identity「${opts.identity}」`, next: '可用值：auto（默认，谁可用用谁）| user | bot。' }
+  }
+  const avail = await larkAvailable(opts)
+  if (!avail.ok) return { ok: false, error: avail.error, next: avail.next }
+  const identities = identitySummary(avail)
+  const pick = want !== 'auto' ? want : avail.user && avail.user.ready ? 'user' : avail.bot && avail.bot.ready ? 'bot' : ''
+  if (!pick || !avail[pick] || !avail[pick].ready) {
+    return {
+      ok: false,
+      error: `${want === 'auto' ? 'user 与 bot 身份都不可用' : `飞书 ${want} 身份不可用`}（${identities.join('｜') || '未取到身份态'}）`,
+      next: identityHint(want === 'auto' ? 'user' : want, avail),
+      identities,
+    }
+  }
+  return { ok: true, identity: pick, as: ['--as', pick], avail, summary: identities }
+}
+
 /**
  * 递归列出远端 .md 文件与目录 token。
  * @returns {Promise<{ok:boolean, files?:Map<string,{fileToken:string, modifiedTime:number, url?:string}>, dirs?:Map<string,string>, ignored?:string[], error?:string}>}
@@ -194,6 +250,8 @@ export async function larkAvailable(opts = {}) {
 export async function feishuListRemote(spec, opts = {}) {
   const s = feishuSpecOf(spec)
   if (!s.folderToken) return { ok: false, error: '缺少 folderToken', next: '先 wiki sync init --folder-token <URL|token> 或用 --new-folder 新建。' }
+  const id = await resolveLarkIdentity(opts)
+  if (!id.ok) return { ok: false, error: id.error, next: id.next, identities: id.identities }
   const files = new Map()
   const dirs = new Map([['', s.folderToken]])
   const ignored = []
@@ -206,7 +264,7 @@ export async function feishuListRemote(spec, opts = {}) {
     do {
       const params = { folder_token: folderToken, page_size: 200 }
       if (pageToken) params.page_token = pageToken
-      const r = unwrap(await runLark(['drive', 'files', 'list', '--params', JSON.stringify(params), '--format', 'json', '--as', 'user'], { ...opts, timeoutMs }))
+      const r = unwrap(await runLark(['drive', 'files', 'list', '--params', JSON.stringify(params), '--format', 'json', ...id.as], { ...opts, timeoutMs }))
       if (!r.ok) return r
       const data = r.data || {}
       entries.push(...(data.files || []))
@@ -358,6 +416,8 @@ export async function feishuPull(spec, opts = {}) {
   const s = feishuSpecOf(spec)
   const remote = await feishuListRemote(s, opts)
   if (!remote.ok) return remote
+  const id = await resolveLarkIdentity(opts)
+  if (!id.ok) return { ok: false, error: id.error, next: id.next, identities: id.identities }
   const dup = duplicateGuard(remote)
   if (dup) return dup
   const rels = Array.isArray(opts.paths) && opts.paths.length ? opts.paths : [...remote.files.keys()]
@@ -370,7 +430,7 @@ export async function feishuPull(spec, opts = {}) {
     await mkdir(dirname(join(s.cacheDir, rel)), { recursive: true })
     const backup = await backupIfExists(s.cacheDir, rel)
     const r = unwrap(
-      await runLark(['markdown', '+fetch', '--file-token', rf.fileToken, '--output', rel, '--overwrite', '--format', 'json', '--as', 'user'], { ...opts, cwd: s.cacheDir, timeoutMs: opts.timeoutMs || FEISHU_FULL_TIMEOUT_MS }),
+      await runLark(['markdown', '+fetch', '--file-token', rf.fileToken, '--output', rel, '--overwrite', '--format', 'json', ...id.as], { ...opts, cwd: s.cacheDir, timeoutMs: opts.timeoutMs || FEISHU_FULL_TIMEOUT_MS }),
     )
     if (!r.ok) {
       if (backup) await copyFile(join(s.cacheDir, backup), join(s.cacheDir, rel)).catch(() => {})
@@ -404,7 +464,7 @@ export async function feishuPull(spec, opts = {}) {
  * 就会在已有同名目录旁边再建一个同名目录（飞书允许重名）——这正是 0.4.6 之前的
  * 重复目录事故根因。同名兄弟已存在（duplicates）时绝不猜：停下来报给用户。
  */
-async function ensureRemoteDirs(s, dirsNeeded, opts, remoteDirs = new Map(), duplicates = []) {
+async function ensureRemoteDirs(s, dirsNeeded, opts, remoteDirs = new Map(), duplicates = [], id = null) {
   const idx = await readIndex(s.cacheDir)
   const dirTokens = { ...(idx.dirTokens || {}), '': s.folderToken }
   for (const [rel, token] of remoteDirs) if (token) dirTokens[rel] = token
@@ -423,7 +483,7 @@ async function ensureRemoteDirs(s, dirsNeeded, opts, remoteDirs = new Map(), dup
     const parent = dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : ''
     const parentToken = dirTokens[parent]
     if (parentToken === undefined) return { ok: false, error: `无法确定父目录 token：${parent || '(根)'}` }
-    const r = unwrap(await runLark(['drive', '+create-folder', '--name', basename(dir), '--folder-token', parentToken, '--format', 'json', '--as', 'user'], opts))
+    const r = unwrap(await runLark(['drive', '+create-folder', '--name', basename(dir), '--folder-token', parentToken, '--format', 'json', ...id.as], opts))
     if (!r.ok) return r
     const token = r.data && (r.data.folder_token || r.data.token || r.data.file_token)
     if (!token) return { ok: false, error: `创建目录成功但未取到 token：${dir}` }
@@ -445,10 +505,12 @@ export async function feishuPush(spec, opts = {}) {
   if (!remote.ok) return remote
   const dup = duplicateGuard(remote)
   if (dup) return dup
+  const id = await resolveLarkIdentity(opts)
+  if (!id.ok) return { ok: false, error: id.error, next: id.next, identities: id.identities }
   const local = await scanLocal(s.cacheDir)
   const rels = Array.isArray(opts.paths) && opts.paths.length ? opts.paths : [...local.keys()]
   const dirsNeeded = new Set(rels.map((rel) => (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '')).filter((d) => d !== ''))
-  const dirs = await ensureRemoteDirs(s, dirsNeeded, opts, remote.dirs, remote.duplicates)
+  const dirs = await ensureRemoteDirs(s, dirsNeeded, opts, remote.dirs, remote.duplicates, id)
   if (!dirs.ok) return dirs
 
   const pushed = []
@@ -462,8 +524,8 @@ export async function feishuPush(spec, opts = {}) {
     const parentRel = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
     const parentToken = dirs.dirTokens[parentRel]
     const args = rf
-      ? ['markdown', '+overwrite', '--file-token', rf.fileToken, '--file', rel, '--format', 'json', '--as', 'user']
-      : ['markdown', '+create', '--name', basename(rel), '--file', rel, '--folder-token', parentToken, '--format', 'json', '--as', 'user']
+      ? ['markdown', '+overwrite', '--file-token', rf.fileToken, '--file', rel, '--format', 'json', ...id.as]
+      : ['markdown', '+create', '--name', basename(rel), '--file', rel, '--folder-token', parentToken, '--format', 'json', ...id.as]
     const r = unwrap(await runLark(args, { ...opts, cwd: s.cacheDir, timeoutMs: opts.timeoutMs || FEISHU_FULL_TIMEOUT_MS }))
     if (!r.ok) return { rel, error: r.error, next: r.next }
     const token = (r.data && (r.data.file_token || r.data.token)) || (rf && rf.fileToken)
@@ -499,6 +561,8 @@ export async function feishuPush(spec, opts = {}) {
  */
 export async function feishuSync(spec, opts = {}) {
   const s = feishuSpecOf(spec)
+  const id = await resolveLarkIdentity(opts)
+  if (!id.ok) return { ok: false, error: id.error, next: id.next, identities: id.identities }
   const before = await feishuStatus(s, opts)
   if (!before.ok) return before
 
@@ -536,7 +600,7 @@ export async function feishuSync(spec, opts = {}) {
   // log.md 双侧都改 → 并集（永不阻塞）
   if (logConflict) {
     const remoteText = logConflict.fileToken
-      ? unwrap(await runLark(['markdown', '+fetch', '--file-token', logConflict.fileToken, '--format', 'json', '--as', 'user'], opts))
+      ? unwrap(await runLark(['markdown', '+fetch', '--file-token', logConflict.fileToken, '--format', 'json', ...id.as], opts))
       : { ok: false }
     const localText = await readFile(join(s.cacheDir, 'log.md'), 'utf8').catch(() => '')
     if (remoteText.ok && remoteText.data && remoteText.data.content) {
@@ -597,10 +661,12 @@ export async function feishuSync(spec, opts = {}) {
 export async function feishuInit(p, opts = {}) {
   const name = String(p.name || '').trim()
   if (!name) return { ok: false, step: 'args', error: '需要 bundle 名（--name）', next: '例：wiki sync init --new-folder 团队知识库 --name 飞书库' }
+  const id = await resolveLarkIdentity(opts)
+  if (!id.ok) return { ok: false, step: 'identity', error: id.error, next: id.next, identities: id.identities }
   let folderToken = feishuParseFolderToken(p.folderToken)
   let createdFolder = null
   if (!folderToken && p.newFolder) {
-    const r = unwrap(await runLark(['drive', '+create-folder', '--name', String(p.newFolder), '--format', 'json', '--as', 'user'], opts))
+    const r = unwrap(await runLark(['drive', '+create-folder', '--name', String(p.newFolder), '--format', 'json', ...id.as], opts))
     if (!r.ok) return { ok: false, step: 'create-folder', error: r.error, next: r.next }
     folderToken = (r.data && (r.data.folder_token || r.data.token || r.data.file_token)) || ''
     if (!folderToken) return { ok: false, step: 'create-folder', error: '建目录成功但未取到 token' }
