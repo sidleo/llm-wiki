@@ -1,8 +1,8 @@
 # @sidleo3/pi-wiki — Pi 的 llm-wiki 知识库扩展
 
 为 [Pi](https://github.com/earendil-works/pi)（AI coding agent）提供 llm-wiki 通用知识库访问：
-**内嵌 vendor-core，与 DSH 插件 `@sidleo3/dsh-wiki` / MCP 服务端 `@sidleo3/mcp-wiki` / skill CLI 完全相同的实现**，读写同一份
-OKF v0.2 bundle（默认 `~/.agents/wiki`），一套数据四处共享、无重复维护。
+**内嵌 vendor-core，与 DSH 插件 `@sidleo3/dsh-wiki` / Codex 插件 `@sidleo3/codex-wiki` / MCP 服务端 `@sidleo3/mcp-wiki` / skill CLI 完全相同的实现**，读写同一份
+OKF v0.2 bundle（默认 `~/.agents/wiki`），一套数据五处共享、无重复维护。
 
 ## 能力
 
@@ -38,7 +38,7 @@ pi install npm:@sidleo3/pi-wiki
 
 ## 配置
 
-- 数据目录默认 `~/.agents/wiki`（与 DSH 插件同一份 bundle），环境变量 `PI_WIKI_DATA_DIR` 覆盖。
+- 数据目录默认 `~/.agents/wiki`（与 DSH / Codex 插件同一份 bundle），环境变量 `PI_WIKI_DATA_DIR` 覆盖。
 - 多目录（命名 bundle）：注册表 `~/.agents/wiki-registry.json`（env `WIKI_REGISTRY_FILE` 覆盖）；`wiki_dirs` 查看、`wiki_use <name> [global:true]` 切换全局默认（pi 无 DSH 的 per-agent 会话态）。
 - 自包含：core 已内嵌为 `vendor-core/`（`npm run sync-vendor` 从仓库 `packages/core` 同步），安装即用无需额外依赖。
 

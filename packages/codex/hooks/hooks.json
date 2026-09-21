@@ -1,0 +1,32 @@
+{
+  "description": "llm-wiki：在会话开始与规则变化时注入当前知识库上下文。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/inject-context.mjs\"",
+            "statusMessage": "加载 llm-wiki 规则",
+            "timeout": 5,
+            "additionalContextLimit": 3500
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/inject-context.mjs\"",
+            "statusMessage": "检查 llm-wiki 规则更新",
+            "timeout": 5,
+            "additionalContextLimit": 3500
+          }
+        ]
+      }
+    ]
+  }
+}

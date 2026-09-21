@@ -1,7 +1,7 @@
 # @sidleo3/mcp-wiki — MCP 服务端（llm-wiki 知识库）
 
 给**任何支持 MCP 的 agent 宿主**（Claude Code / Cursor / Codex / …）提供 llm-wiki 通用知识库访问：
-**内嵌 vendor-core，与 DSH 插件 `@sidleo3/dsh-wiki` / pi 扩展 `@sidleo3/pi-wiki` / skill CLI 完全相同的实现**
+**内嵌 vendor-core，与 DSH 插件 `@sidleo3/dsh-wiki` / Codex 插件 `@sidleo3/codex-wiki` / pi 扩展 `@sidleo3/pi-wiki` / skill CLI 完全相同的实现**
 （`scripts/sync-vendor.mjs` 从 `packages/core` 同步），读写同一份 OKF v0.2 bundle（默认 `~/.agents/wiki`）。
 
 设计目标：**在没有插件机制的宿主里，把体验做到尽量接近 DSH 版**——同样的 14 个 `wiki_*` 工具（同名/同参/同输出文本）、
@@ -91,7 +91,7 @@ wiki-mcp [--data-dir DIR] [--bundles 名=路径[,名=路径]] [--check]
 | `WIKI_REGISTRY_FILE` | 命名 bundle 注册表路径覆盖（默认 `~/.agents/wiki-registry.json`） |
 | `WIKI_LARK_BIN` | 飞书同步用的 `lark-cli` 路径覆盖 |
 
-命名 bundle 注册表与另三形态**共享同一份**：`wiki_dirs` 查看、`wiki_use <名字> [global:true]` 切换。
+命名 bundle 注册表与另四形态**共享同一份**：`wiki_dirs` 查看、`wiki_use <名字> [global:true]` 切换。
 
 ## 纯本地说明
 
@@ -108,7 +108,7 @@ MCP 协议只在 `initialize` 时下发一次 `instructions`，因此规则送�
 
 1. `instructions`：恒定工具引导 + 当前 bundle（名 + 路径）+ 可用目录 + 各目录 `APPEND_SYSTEM_PROMPT.md` 正文；
 2. `wiki_rules`：随时取全库或某目录生效规则（含 `AGENTS.md` 门控链）；
-3. `wiki get/create/update` 的响应末尾**自动附带**目标目录生效规则（core 行为，四形态一致）；
+3. `wiki get/create/update` 的响应末尾**自动附带**目标目录生效规则（core 行为，五形态一致）；
 4. `wiki_use` 切库后，把新库的规则上下文直接附在切换结果里。
 
 若你的宿主要求「常驻 system prompt」里必须出现使用要求，跑 `wiki prompt`（CLI）拿到一段可直接粘贴的文本，
@@ -127,4 +127,4 @@ cd packages/mcp && npm install && npm test
 
 - 数据格式：[`schema.md`](../../schema.md)（OKF v0.2 对齐）
 - 目录规则与注入机制：[`SPEC-EXTENSIONS.md`](../../SPEC-EXTENSIONS.md)
-- 另三形态：DSH 插件 [`packages/dsh`](../dsh)、pi 扩展 [`packages/pi`](../pi)、skill + CLI [`packages/skill`](../skill)
+- 另四形态：DSH 插件 [`packages/dsh`](../dsh)、Codex 插件 [`packages/codex`](../codex)、pi 扩展 [`packages/pi`](../pi)、skill + CLI [`packages/skill`](../skill)

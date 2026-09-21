@@ -15,7 +15,7 @@ AGENTS.md / APPEND_SYSTEM_PROMPT.md 规则解析（向上遍历）、
 定时自动同步的配置持久化（autosync.mjs：开关/间隔/身份按机器存 ~/.agents/wiki-autosync.json，
 间隔默认 5 分钟；含运行结果记录与陈旧 running 判据。定时器本身属宿主能力，由 DSH 插件执行）。
 
-被四形态复用：DSH 插件 `@sidleo3/dsh-wiki`、pi 扩展 `@sidleo3/pi-wiki`、MCP 服务端 `@sidleo3/mcp-wiki`、skill CLI `wiki`
+被五形态复用：DSH 插件 `@sidleo3/dsh-wiki`、Codex 插件 `@sidleo3/codex-wiki`、pi 扩展 `@sidleo3/pi-wiki`、MCP 服务端 `@sidleo3/mcp-wiki`、skill CLI `wiki`
 （后三者内嵌 vendor-core 自包含，本包供仓库开发态/自定义集成引用）。
 
 ```js

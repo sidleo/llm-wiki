@@ -14,7 +14,7 @@ An open-source, generic, agent-first knowledge base: **the format layer strictly
 - **Progressive disclosure** — every session carries injected tool guidance plus the active bundle/category list; `wiki_list` shows the whole tree first, then you search and drill in.
 - **Real cross-links + automatic backlinks** — concepts reference each other with Markdown links; reading a concept automatically surfaces the pitfalls and rules that cite it.
 - **Directory-level rules (`AGENTS.md`)** — per-directory write gates (which concept types need human confirmation) and behavioral conventions, resolved bottom-up with child directories overriding parents.
-- **Per-directory prompt injection (`APPEND_SYSTEM_PROMPT.md`)** — each category defines its own behavior rules; identical content across all four forms and effective immediately after an edit. DSH rides a constant section plus a runtime-context snapshot; the pi extension hooks `before_agent_start` to re-read them **every turn** and append them to that turn's system prompt; the MCP server sends the same text through the `initialize` `instructions` field (the protocol only delivers it once per connection — reconnect or call `wiki rules` after an edit); the skill/CLI form has no injection hook, so it uses `wiki rules` (no args = load every rule verbatim) plus rules automatically appended to `wiki get/create/update` responses — the rules travel with the data, so nothing depends on the agent remembering to load them. See [SPEC-EXTENSIONS.md](SPEC-EXTENSIONS.md).
+- **Per-directory prompt injection (`APPEND_SYSTEM_PROMPT.md`)** — each category defines its own behavior rules; identical content across all five forms and effective immediately after an edit. DSH rides a constant section plus a runtime-context snapshot; the pi extension hooks `before_agent_start` to re-read them **every turn** and append them to that turn's system prompt; the Codex plugin injects them through `SessionStart` / `UserPromptSubmit` hooks (no duplicate injection when unchanged, refresh next turn, rebuild after compaction); the MCP server sends the same text through the `initialize` `instructions` field (the protocol only delivers it once per connection — reconnect or call `wiki rules` after an edit); the skill/CLI form has no injection hook, so it uses `wiki rules` (no args = load every rule verbatim) plus rules automatically appended to `wiki get/create/update` responses — the rules travel with the data, so nothing depends on the agent remembering to load them. See [SPEC-EXTENSIONS.md](SPEC-EXTENSIONS.md).
 - **Lifecycle** — `stale_after` expiry, `status: deprecated` (concept-level) and directory-level deprecation, auto-maintained `index.md` / `log.md`.
 - **Validation & health** — `wiki_validate` (OKF compliance) and `wiki_lint` (broken links, orphans, stale entries, missing index).
 - **Multiple bundles** — register several wiki directories as named bundles and switch between them (session-level or persisted globally).
@@ -57,6 +57,7 @@ llm-wiki/
 │   ├── dsh/                # DSH plugin → npm @sidleo3/dsh-wiki
 │   ├── pi/                 # pi extension → npm @sidleo3/pi-wiki
 │   ├── mcp/                # MCP server (stdio) → npm @sidleo3/mcp-wiki
+│   ├── codex/              # Codex plugin (skill + bundled MCP + hooks) → npm @sidleo3/codex-wiki
 │   └── skill/              # skill form → SKILL.md + `wiki` CLI
 ├── examples/demo-bundle/   # Synthetic demo bundle (openable in Obsidian)
 ├── scripts/                # Dev helper scripts
@@ -64,16 +65,17 @@ llm-wiki/
 └── obsidian/               # Obsidian templates / Dataview examples
 ```
 
-## Four Consumption Forms
+## Five Consumption Forms
 
 | Form | Install | Capability |
 |------|---------|-----------|
 | DSH plugin | `dsh plugin --profile web add @sidleo3/dsh-wiki` | Layered injection (constant section + runtime-context snapshot) + `wiki_*` tools |
 | pi extension | `pi install npm:@sidleo3/pi-wiki` | `wiki_*` tools + prompt guidance + per-turn category rules via `before_agent_start` |
 | MCP server | see `packages/mcp/README.md` (absolute node path in the host's MCP config) | the same 14 `wiki_*` tools; rules delivered via `instructions` + response appendices; works in any MCP-capable host |
+| Codex plugin | `codex plugin add codex@personal` (see `packages/codex/README.md`) | bundled skill + the same 14 `wiki_*` MCP tools + `SessionStart`/`UserPromptSubmit` rule injection |
 | skill + CLI | `~/.agents/skills/wiki/` (see `packages/skill/INSTALL.md`) | SKILL.md guidance + `wiki` CLI (any agent harness); rules via `wiki rules` and get/create/update responses |
 
-All four forms read and write **the same bundle** with identical behavior — they reuse `packages/core`, no duplicated implementation.
+All five forms read and write **the same bundle** with identical behavior — they reuse `packages/core`, no duplicated implementation.
 
 ## Tools (14)
 
@@ -145,7 +147,7 @@ Settings → Plugins → Plugin configuration → llm-wiki card (the host render
 
 The default data directory is `~/.agents/wiki`. To manage several wiki directories, register them as named bundles:
 
-- **Registry file** (shared across all four forms; default `~/.agents/wiki-registry.json`, overridable via env `WIKI_REGISTRY_FILE`):
+- **Registry file** (shared across all five forms; default `~/.agents/wiki-registry.json`, overridable via env `WIKI_REGISTRY_FILE`):
 
   ```json
   { "bundles": { "work": "/abs/path/a", "personal": "~/notes/wiki" }, "active": "work" }
@@ -161,7 +163,7 @@ The default data directory is `~/.agents/wiki`. To manage several wiki directori
         personal: ~/notes/wiki
   ```
 
-- **Switching** — `wiki_use <name> [global: true]`: session-level by default in the DSH host (isolated per conversation); `global: true` persists it as the global default (writes the registry `active`, affecting new sessions and the CLI/pi forms). `wiki_dirs` lists the branches. The CLI uses `wiki dirs` / `wiki use NAME [--global]`, and any command accepts `--wiki NAME`.
+- **Switching** — `wiki_use <name> [global: true]`: session-level by default in the DSH host (isolated per conversation); `global: true` persists it as the global default (writes the registry `active`, affecting new sessions and the CLI/pi/codex forms). `wiki_dirs` lists the branches. The CLI uses `wiki dirs` / `wiki use NAME [--global]`, and any command accepts `--wiki NAME`.
 - Resolution order (no explicit name): registry `active` (if a known name) → `default` (`dataDir` fallback). See `wiki help bundle`.
 
 ## Quick Start
@@ -191,8 +193,9 @@ node --test tests/feishu-backend.test.mjs # 25 checks: Feishu cloud-drive backen
 node --test tests/autosync.test.mjs      # 17 checks: scheduled auto-sync (config persistence, interval/identity clamping, run recording, scheduler + conflict safety)
 node --test tests/feishu-delete.test.mjs # 11 checks: real deletion (explicit-paths-only, refuses unsynced-side deletes, dry-run default, no resurrection, stop-on-first-failure, CLI end-to-end)
 node --test tests/dsh-client-bundle-test.mjs   # 5 checks: card bundle contract + jsdom render smoke
-(cd packages/pi && npm install --legacy-peer-deps && npm test)   # 13 checks: pi extension (mock pi)
+(cd packages/pi && npm install --legacy-peer-deps && npm test)   # 15 checks: pi extension (mock pi)
 (cd packages/mcp && npm install && npm test)   # 17 checks: MCP form (SDK stdio client end-to-end + tool/output parity with the DSH plugin + stdout purity)
+(cd packages/codex && npm test)               # 10 checks: Codex plugin (manifest/hook + zero-dependency MCP + tool-contract parity)
 node --test tests/three-forms.test.mjs   # 5 checks: all three forms read/write the same bundle consistently
 ```
 

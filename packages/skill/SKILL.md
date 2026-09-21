@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 0.6.2
+version: 0.6.3
 description: >-
   工作知识库（OKF v0.2 markdown bundle，用 `wiki` CLI 读写）：收录某个团队/领域**反复要用到的知识**
   ——事实与结构、约定与口径、流程与规范、经验与坑点。**以下情况先用本 skill 查库，不要凭记忆或印象回答**：
@@ -56,7 +56,7 @@ metadata:
 宿主是否加载、加载后会不会真去查库，不由我们决定。跑 `wiki prompt` 拿到一段可直接粘贴的
 「宿主常驻要求」，写进**宿主自己的**「自定义指令 / 系统提示词 / 项目 AGENTS.md」——
 相当于替这个宿主补上每轮注入（你有文件权限就直接写，没有就让用户粘贴）。
-换任何新宿主都是同一招；DSH 插件、pi 扩展与 MCP 形态会自动下发（MCP 经 `instructions`，见 packages/mcp/README.md），不需要。详见 `wiki help prompt`。
+换任何新宿主都是同一招；DSH 插件、Codex 插件、pi 扩展与 MCP 形态会自动下发（MCP 经 `instructions`，见 packages/mcp/README.md），不需要。详见 `wiki help prompt`。
 
 ## 1. 何时使用本 Skill
 

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "wiki": {
+      "command": "node",
+      "args": [
+        "./bin/wiki-mcp.mjs"
+      ],
+      "cwd": "."
+    }
+  }
+}

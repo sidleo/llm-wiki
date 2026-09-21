@@ -1,0 +1,38 @@
+{
+  "name": "@sidleo3/codex-wiki",
+  "version": "0.6.3",
+  "description": "Codex plugin for the llm-wiki knowledge base: bundled skill, 14 wiki_* MCP tools, and session-time APPEND_SYSTEM_PROMPT.md rule injection. Self-contained and shared with DSH / Pi / MCP / Skill forms.",
+  "author": "sidleo",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "codex-plugin",
+    "codex",
+    "knowledge-base",
+    "okf",
+    "llm-wiki",
+    "mcp",
+    "markdown",
+    "progressive-disclosure"
+  ],
+  "files": [
+    ".codex-plugin/",
+    ".mcp.json",
+    "bin/",
+    "hooks/",
+    "lib/",
+    "skills/",
+    "vendor-core/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "sync-upstream": "node scripts/sync-upstream.mjs",
+    "check": "node --check bin/wiki-mcp.mjs && node --check hooks/inject-context.mjs && node --check scripts/sync-upstream.mjs",
+    "test": "node --test test/*.test.mjs",
+    "prepack": "npm run sync-upstream"
+  }
+}

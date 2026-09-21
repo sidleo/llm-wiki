@@ -1,0 +1,38 @@
+{
+  "name": "codex",
+  "version": "0.6.3+codex.20260921021136",
+  "description": "Use the local OKF v0.2 llm-wiki knowledge bundle in Codex through 14 wiki tools, a bundled skill, and fresh directory-rule injection.",
+  "author": {
+    "name": "sidleo"
+  },
+  "homepage": "https://github.com/sidleo/llm-wiki",
+  "repository": "https://github.com/sidleo/llm-wiki",
+  "license": "MIT",
+  "keywords": [
+    "llm-wiki",
+    "okf",
+    "knowledge-base",
+    "mcp",
+    "markdown",
+    "progressive-disclosure"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "LLM Wiki for Codex",
+    "shortDescription": "Use your local OKF knowledge bundle in Codex",
+    "longDescription": "LLM Wiki for Codex connects Codex to the same local OKF v0.2 markdown bundle used by the DSH, Pi, MCP, and Skill forms. The plugin bundles a wiki skill, 14 wiki_* MCP tools, and lifecycle hooks that refresh the active bundle and per-directory APPEND_SYSTEM_PROMPT.md rules without duplicating knowledge.",
+    "developerName": "sidleo",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "List my knowledge bundle and explain its structure",
+      "Check our established metric definition before writing SQL",
+      "Record this verified pitfall in the knowledge bundle"
+    ],
+    "brandColor": "#2563EB"
+  }
+}
