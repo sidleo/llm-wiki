@@ -267,6 +267,29 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
     assert.equal(r.ok, true, JSON.stringify(r))
   })
 
+  test('读不到远端内容时不猜：保守判为冲突（宁可停下，也不误判为相同）', async () => {
+    await writeLocal('a.md', '# 原始\n')
+    assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)
+
+    const st = await readState(stateFile)
+    st.files['a.md'].modified += 5000
+    await writeFile(stateFile, JSON.stringify(st))
+    await writeLocal('a.md', '# 原始\n') // 内容其实相同，但两侧元数据都变
+
+    process.env.FAKE_LARK_DENY_FETCH = '1'
+    try {
+      const before = await core.feishuStatus(spec())
+      assert.equal(before.ok, true)
+      assert.deepEqual(before.conflict.map((c) => c.rel), ['a.md'], '读不到内容时必须保守判冲突')
+      assert.equal(before.conflict[0].unverified, true, '应标记「未验证」，让人知道是没法比对而非确证不同')
+      const r = await core.feishuSync(spec())
+      assert.equal(r.ok, false)
+      assert.equal(r.step, 'conflict')
+    } finally {
+      delete process.env.FAKE_LARK_DENY_FETCH
+    }
+  })
+
   test('内容真不同时仍然是冲突（假冲突修复不能放过真冲突）', async () => {
     await writeLocal('a.md', '# 原始\n')
     assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)

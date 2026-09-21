@@ -39,6 +39,8 @@ const ROOT = process.env.FAKE_LARK_ROOT || 'fldcnROOT'
  *   FAKE_LARK_BOT_DENIED=1  → 由 bot 发起的调用返回 app_scope_not_applied
  *   FAKE_LARK_DENY_WRITES=1 → 只让写命令（+create / +overwrite / +create-folder）失败，
  *                             用于测「列举通过、单文件写被拒」这条分支
+ *   FAKE_LARK_DENY_FETCH=1  → 只让 markdown +fetch 失败（列举仍可读），
+ *                             用于测「双侧都变但读不到远端内容」时的保守回退
  */
 const AS = (() => {
   const i = argv.indexOf('--as')
@@ -48,6 +50,7 @@ const AS = (() => {
 const deny = process.env.FAKE_LARK_USER_DENIED === '1' && AS === 'user' ? true : process.env.FAKE_LARK_BOT_DENIED === '1' && AS === 'bot'
 const WRITE_CMDS = ['+create', '+overwrite', '+create-folder', '+delete']
 const denyWriteOnly = process.env.FAKE_LARK_DENY_WRITES === '1'
+const denyFetch = process.env.FAKE_LARK_DENY_FETCH === '1'
 const denyMessage =
   AS === 'bot'
     ? 'access denied: app cli_fake has not applied for the required scope(s): drive:drive, space:document:retrieve'
@@ -164,6 +167,7 @@ if (domain === 'auth' && cmd === 'status') {
 
 // 身份被做成不可用/无 scope 时：任何真实调用都失败（auth status 除外，它是探测入口）
 if (deny || (denyWriteOnly && WRITE_CMDS.includes(cmd))) fail(denyMessage, AS === 'bot' ? 'authorization' : 'auth')
+if (denyFetch && domain === 'markdown' && cmd === '+fetch') fail('fetch unavailable (FAKE_LARK_DENY_FETCH)', 'api_error')
 
 if (domain === 'drive' && cmd === 'files' && argv[2] === 'list') {
   const params = JSON.parse(flag('--params') || '{}')
