@@ -30,8 +30,99 @@ import { formatFeishuResult, formatGitResult } from './format.mjs'
 const WHEN_TO_USE =
   '【何时用】要引用既有事实或结构、要遵守既有约定或口径、动手前有既有做法与红线、出现对不上或不一致要排查，或用户提到「按我们的规定」「上次那个坑」时 —— 必须先调用本工具查库，不要凭记忆回答。'
 
+/**
+ * `-> <路径>` 的用法说明（概念行尾那段的含义），**与 DSH 形态逐字一致**。
+ *
+ * MCP 形态没有保证注入通道，工具 description 是唯一能告知模型的地方；而这条约定此前
+ * 只写在代码注释里，模型看不到 → 拿到绝对路径也可能不知道怎么用（尖括号常被丢掉，
+ * 含空格的路径随即被 CommonMark 截断成死链）。parity.test.mjs 会逐字节对拍 DSH，
+ * 所以这段文案必须与 `packages/dsh/wiki.mjs` 保持同一份（改一处必须同步另一处）。
+ */
+const REF_NOTE_TAIL =
+  '的 `-> <路径>` 是该条目的真实文件路径，引用时用 `[标题](<路径>)` 原样复制（尖括号必须保留）。'
+
 function strErr(e) {
   return { text: `错误：${e && e.message ? e.message : String(e)}` }
+}
+
+/**
+ * 目录概览渲染（方案 A，见 core/lib/overview.mjs）。
+ * `renderOverview` 同样来自 vendor-core / 开发态 core，旧 vendor 快照里可能缺失——
+ * 那时退回「平铺 + 字符级截断」的旧行为（不抛错；只是仍会截断）。
+ */
+function overview(core, tree, scopeNote) {
+  if (typeof core.renderOverview === 'function') {
+    try {
+      return core.renderOverview(tree, scopeNote ? { scopeNote } : {})
+    } catch {
+      // 渲染失败退回旧平铺（见下）
+    }
+  }
+  const lines = []
+  for (const t of Array.isArray(tree) ? tree : []) {
+    lines.push(`[${t.dir || '(root)'}]`)
+    for (const item of t.concepts || []) {
+      lines.push(`  ${item.type ? `${item.type}: ` : ''}${item.title || ''}  (${item.id || ''})${item.status === 'deprecated' ? ' [deprecated]' : ''}`)
+    }
+  }
+  const total = (Array.isArray(tree) ? tree : []).reduce((n, t) => n + (t.concepts ? t.concepts.length : 0), 0)
+  lines.push(`\n共 ${total} 个概念。`)
+  return lines.join('\n')
+}
+
+/** 按整行截断兜底（概念行含长路径，字符级 slice 会切出半条路径）。 */
+function truncate(core, text, maxChars) {
+  if (typeof core.truncateByLine === 'function') {
+    try {
+      return core.truncateByLine(text, maxChars)
+    } catch {
+      // 退回字符级截断（旧行为）
+    }
+  }
+  return text.slice(0, maxChars)
+}
+
+/** 过滤场景的说明文案（非空时概览会标注「这是子集」）。 */
+function scopeNoteOf(args) {
+  const parts = []
+  if (args.type) parts.push(`type=${args.type}`)
+  if (args.status) parts.push(`status=${args.status}`)
+  return parts.join(' ')
+}
+
+/**
+ * 概念行渲染：`type: title  (id)  ->  /abs/path.md`（见 core/lib/ref.mjs 的来由）。
+ *
+ * `formatConceptRef` 来自 vendor-core / 开发态 core——**自包含安装的 vendor 可能还是
+ * 没有 ref.mjs 的旧快照**，那里 `core.formatConceptRef` 是 undefined。此时退回
+ * 旧形态 `type: title  (id)`：输出少一段展示信息，但绝不抛错、绝不影响 id 语义。
+ */
+function formatRef(core, root, concept, opts) {
+  if (typeof core.formatConceptRef === 'function') {
+    try {
+      return core.formatConceptRef(root, concept, opts)
+    } catch {
+      // 渲染失败（异常 root 等）不该拖垮整个工具调用
+    }
+  }
+  const prefix = (opts && opts.typePrefix) || ''
+  return `${prefix}${concept && concept.type ? `${concept.type}: ` : ''}${(concept && concept.title) || ''}  (${(concept && concept.id) || ''})`
+}
+
+/**
+ * 概念 id → 附加在标题行尾的绝对路径后缀；拿不到就返回空串（旧输出）。
+ * 与 DSH 形态的 withAbsRef 同形（`id  ->  </abs/path.md>`），只是这里拼在既有前缀之后。
+ * 用 core 的 conceptLinkTarget（含尖括号、内部已含 `?`/控制字符降级）——
+ * 尖括号必加：真实 bundle 路径含空格（iCloud「Mobile Documents」），不加会被 CommonMark 截断。
+ */
+function absSuffix(core, root, id) {
+  if (typeof core.conceptLinkTarget !== 'function') return ''
+  try {
+    const target = core.conceptLinkTarget(root, id)
+    return target ? `  ->  ${target}` : ''
+  } catch {
+    return ''
+  }
 }
 
 /**
@@ -104,13 +195,17 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
   const add = (name, description, parameters, run) =>
     tools.set(name, { name, description: Array.isArray(description) ? description.join('\n') : description, parameters, run })
 
+  /** 以某个 bundle 根渲染概念行（root 为空时 core 自然退回旧格式）。 */
+  const ref = (root, concept, opts) => formatRef(core, root, concept, opts)
+
   // ──────────────────────────── wiki_list ────────────────────────────
   add(
     'wiki_list',
     [
       WHEN_TO_USE,
-      '列出 llm-wiki 知识库（OKF v0.2 bundle）的目录树与概念清单。',
+      '列出 llm-wiki 知识库（OKF v0.2 bundle）的目录概览（目录 → 概念数 + 类型分布 + 少量示例）。',
       '【硬要求】做任何知识相关工作的第一步，必须先调用本工具看全貌，再决定下一步。',
+      '本工具只给目录概览，不给全部条目：取具体内容用 wiki_search，已知 id 用 wiki_get。',
     ],
     {
       type: 'object',
@@ -124,16 +219,11 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
         const dataDir = (await resolveActive()).path
         const tree = await core.listBundle(dataDir, { type: args.type, status: args.status })
         if (!tree.length) return { text: '（知识库为空或过滤后无概念）' }
-        const lines = []
-        for (const t of tree) {
-          lines.push(`[${t.dir || '(root)'}]`)
-          for (const item of t.concepts) {
-            lines.push(`  ${item.type}: ${item.title}  (${item.id})${item.status === 'deprecated' ? ' [deprecated]' : ''}`)
-          }
-        }
-        const total = tree.reduce((n, t) => n + t.concepts.length, 0)
-        lines.push(`\n共 ${total} 个概念。`)
-        return { text: lines.join('\n').slice(0, limits.maxGetChars) }
+        // 目录概览而非平铺：平铺会撞 maxGetChars 被**字符级硬切**（实测真实库 364 概念
+        // 只完整给出 184 个，180 个静默丢失），违背「第一步看全貌」的定位。渲染层改，
+        // listBundle 结构不变（config 页体检与 wiki_lint 仍依赖完整 tree）。
+        const text = overview(core, tree, scopeNoteOf(args))
+        return { text: truncate(core, text, limits.maxGetChars) }
       } catch (e) { return strErr(e) }
     },
   )
@@ -145,6 +235,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
       WHEN_TO_USE,
       '搜索 llm-wiki 知识库：匹配 frontmatter（type/title/description/tags）+ 正文；支持词元拆分与量词后缀兜底；强匹配标 ★ 排前。',
       '支持 type 与 tag 过滤。未命中会提示用 wiki_list / wiki_lint。',
+      `结果行尾${REF_NOTE_TAIL}`,
     ],
     {
       type: 'object',
@@ -164,7 +255,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
         const graph = await core.buildGraph(dataDir)
         const res = core.searchGraph(graph, q, { type: args.type, tag: args.tag, limit: Number(args.limit) || 20 })
         if (!res.length) return { text: '无匹配。若你正在用的知识确实不在库中，这是主动记录信号——用 wiki_create 建概念（探查类事实可直接记；口径/约定类先向用户展示确认）。也可 wiki_list 看全貌或 wiki_lint 看缺失清单。' }
-        const lines = res.map((r) => `${r.strong ? '★' : ''}${r.type}: ${r.title}  (${r.id})\n    ${r.description || ''}`)
+        const lines = res.map((r) => `${ref(dataDir, r, { typePrefix: r.strong ? '★' : '' })}\n    ${r.description || ''}`)
         return { text: lines.join('\n').slice(0, limits.maxGetChars) }
       } catch (e) { return strErr(e) }
     },
@@ -173,7 +264,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
   // ──────────────────────────── wiki_get ────────────────────────────
   add(
     'wiki_get',
-    `${WHEN_TO_USE}\n读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。`,
+    `${WHEN_TO_USE}\n读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。\n标题行与 backlinks 行尾${REF_NOTE_TAIL}`,
     {
       type: 'object',
       properties: { id: { type: 'string', description: 'Concept ID（如 tables/orders）或 title' } },
@@ -186,13 +277,13 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
         if (!got) return { text: `未找到: ${args.id}。若这是你工作中真实存在的概念，可用 wiki_create 主动补录（探查类事实可直接记）。或 wiki_list 看全貌。` }
         if (got.ambiguous) return { text: `标题「${args.id}」有多个候选: ${got.candidates.join(', ')}。请用完整 id。` }
         const lines = [
-          `# ${got.title}  (${got.id})`,
+          `${ref(dataDir, got, { typePrefix: '# ' })}`,
           `type: ${got.type}${got.meta.status ? ` | status: ${got.meta.status}` : ''}${got.meta.runtime ? ` | runtime: ${got.meta.runtime}` : ''}`,
           '',
           got.desc || '',
           '',
           `--- backlinks (${got.backlinks.length}) ---`,
-          ...(got.backlinks.length ? got.backlinks.map((b) => `  ${b.type}: ${b.title}  (${b.id})`) : ['  （无入链）']),
+          ...(got.backlinks.length ? got.backlinks.map((b) => `  ${ref(dataDir, b)}`) : ['  （无入链）']),
           '',
           '--- body ---',
           got.body.trim(),
@@ -252,7 +343,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
             version,
           },
         })
-        return { text: `已创建 ${created.id}${await onlineFlush(dataDir)}` }
+        return { text: `已创建 ${created.id}${absSuffix(core, dataDir, created.id)}${await onlineFlush(dataDir)}` }
       } catch (e) { return strErr(e) }
     },
   )
@@ -284,7 +375,7 @@ export function createWiki({ core, config = {}, version = MCP_VERSION, producer 
         const blocked = await onlineGuard(dataDir, [`${args.id}.md`])
         if (blocked) return { text: blocked }
         await core.updateConcept(dataDir, args.id, patch)
-        return { text: `已更新 ${args.id}${await onlineFlush(dataDir)}` }
+        return { text: `已更新 ${args.id}${absSuffix(core, dataDir, args.id)}${await onlineFlush(dataDir)}` }
       } catch (e) { return strErr(e) }
     },
   )

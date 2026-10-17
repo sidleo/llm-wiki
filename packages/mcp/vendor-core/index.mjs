@@ -25,6 +25,8 @@ export { buildAgentPrompt, buildAgentPromptDoc } from './lib/prompt.mjs'
 export { renderIndexBody, writeDirIndex, updateIndex, refreshIndex, mergeLogText, appendLog } from './lib/indexlog.mjs'
 export { createConcept, updateConcept, deprecateDir, nowIso, checkId } from './lib/write.mjs'
 export { ingestSource } from './lib/ingest.mjs'
+export { conceptAbsPath, conceptLinkTarget, formatConceptRef, bundleRootOf } from './lib/ref.mjs'
+export { renderOverview, truncateByLine } from './lib/overview.mjs'
 
 // Git 远端同步（在线知识库 · 本地目录后端）：headless、无三方依赖、凭证交给 git
 export { gitAvailable, gitStatus, gitSync, gitInit, gitClone, DEFAULT_GIT_TIMEOUT_MS } from './lib/git.mjs'

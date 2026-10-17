@@ -30,35 +30,44 @@ window.__ModuleLoader__.load({
 		react = __toESM(react, 1);
 		//#region src/client/index.ts
 		/**
-		* dsh-wiki 客户端半 —— 设置 → 插件 → 插件配置 里的 llm-wiki 卡片。
+		* dsh-wiki 客户端半 —— llm-wiki 知识库的图形化配置页。
 		*
-		* 契约（DSH 0.1.5-rc.2）：
+		* 契约（DSH 0.1.7-rc.2；0.2.0-rc.1 复核一致——dsh-client-modules 两版字节相同）：
 		* - bundle = 经典脚本 + CJS 工厂 `window.__ModuleLoader__.load({ id, factory })`，导出 `inject` / `apply`；
-		* - 卡片注册进 keyed slot `settings.plugin.item`，`key` 必须等于宿主注册的设置命名空间（这里是 dsh-wiki）——
-		*   宿主「插件配置」Tab 只渲染「已服务命名空间 ∩ 已注册卡片」；
 		* - React 与平台模块经 loader 模块表 require（构建期 external），服务经 `ctx.get` 取；
-		* - 宿主半可用性探测：卡片自绘（primitives 无 Switch/Select/表单渲染器，官方 Field 未导出）。
+		*   不在 shell 种子 9 项基线内的模块必须写进 `dsh.client.external`，否则 factory 物化时抛错、
+		*   整个 web boot 失败（web boot: N entries did not activate），不是单插件静默失效；
+		* - DSH 0.1.7 起不再有「设置 → 插件 → 插件配置」Tab（`settings.plugin.item` 已随官方重构移除），
+		*   插件配置改在侧栏「插件」页，页面注册进两个 slot（同一组件，两处入口）：
+		*     `settings.section`（list，`id` 即导航项）→ 设置 → llm-wiki 知识库；
+		*     `plugins.bundle.config`（keyed by 包名）→ 侧栏「插件」→ 本 bundle 页面。
+		*   两者都由官方包声明（分别来自 client-ui-settings-general 的 sidebar.settings 条目、
+		*   client-ui-plugin-manager 的 main 条目），`slots.inject` 等声明出现后再回调；
+		* - 宿主半可用性探测：页面自绘（primitives 未导出 Field/Switch/表单渲染器）。
 		*
-		* 三个区（全部通过宿主 RPC /api/dsh-wiki/* 读写）：
-		*   命名目录（写 core 注册表，与 CLI/pi 共享）/ 在线同步（core Git 远端）/ 体检与索引
+		* 四个区（全部通过宿主 RPC /api/dsh-wiki/* 读写）：
+		*   命名目录（写 core 注册表，与 CLI/pi 共享）/ 在线同步 / 定时自动同步 / 体检与索引
 		* 运行参数不在这里改：它是部署级配置，改 profile 的 cordis.patch.yml（插件不会自动改写它）。
 		*/
 		const inject = ["slots"];
-		const NS = "dsh-wiki";
+		/** `settings.section` 的 id：导航项 key。官方区块 order 为 -10…20，第三方排在其后。 */
+		const SECTION_ID = "llm-wiki";
+		const SECTION_ORDER = 62;
+		/** `plugins.bundle.config` 的 key = 本 bundle 的包名。 */
+		const BUNDLE = "@sidleo3/dsh-wiki";
 		const API = "/api/dsh-wiki";
 		const e = react.default.createElement;
+		/**
+		* 派生文件：由 core 自己生成/追加，不是人工撰写的知识——两侧都变时同步会自行处理
+		* （index.md 按本地目录树重生成、log.md 取并集），不会停下来，故界面上不与概念冲突并列。
+		*/
+		const isDerived = (rel) => /(^|\/)(index|log)\.md$/.test(String(rel));
 		/** 一次性注入样式；带 data-plugin 便于 HMR 卸载时清理。 */
 		const CSS = `
-.dwCard { list-style:none; border:1px solid var(--dsw-alias-border-l2); border-radius:12px; background:var(--dsw-alias-bg-layer-3); margin:0; transition:border-color .16s,background .16s }
-.dwCard:hover { border-color:var(--dsw-alias-label-dimmed) }
-.dwCardOpen { background:var(--dsw-alias-bg-layer-2); border-color:var(--dsw-alias-label-dimmed) }
-.dwHeader { width:100%; appearance:none; border:0; background:none; font:inherit; color:inherit; text-align:left; cursor:pointer; display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:12px }
-.dwHeader:focus-visible { outline:2px solid var(--dsw-alias-brand-primary); outline-offset:-2px }
-.dwHeadText { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px }
-.dwName { font-size:15px; font-weight:600; line-height:1.4; color:var(--dsw-alias-label-primary) }
-.dwDesc { font-size:13px; line-height:1.5; color:var(--dsw-alias-label-tertiary) }
-.dwChevron { flex:none; color:var(--dsw-alias-label-tertiary); display:inline-flex }
-.dwBody { border-top:1px solid var(--dsw-alias-border-l2); margin:0 16px; padding:10px 0 4px }
+.dwPage { display:flex; flex-direction:column; gap:4px; max-width:760px; color:var(--dsw-alias-label-primary) }
+.dwHead { display:flex; flex-direction:column; gap:4px; margin-bottom:8px }
+.dwTitle { margin:0; font-size:18px; font-weight:600; line-height:1.4; color:var(--dsw-alias-label-primary) }
+.dwIntro { margin:0; font-size:12.5px; line-height:1.5; color:var(--dsw-alias-label-tertiary) }
 .dwSection { margin-bottom:14px }
 .dwSectionTitle { font-size:13px; font-weight:600; line-height:1.4; color:var(--dsw-alias-label-primary); margin:0 0 6px }
 .dwHint { font-size:12px; line-height:1.5; color:var(--dsw-alias-label-tertiary); margin:2px 0 6px }
@@ -78,7 +87,10 @@ window.__ModuleLoader__.load({
 .dwBtn { appearance:none; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; padding:4px 10px; background:none; color:var(--dsw-alias-label-secondary); font:inherit; font-size:12.5px; cursor:pointer }
 .dwBtn:hover { color:var(--dsw-alias-label-primary); border-color:var(--dsw-alias-label-dimmed) }
 .dwBtn:disabled { opacity:.45; cursor:default }
-.dwBtnPrimary { background:var(--dsw-alias-label-primary); color:var(--dsw-alias-bg-layer-3); border-color:transparent }
+/* 实心按钮的文字色必须是它自己的底色：上面的 .dwBtn:hover 会把 color 改成 label-primary，
+   与 .dwBtnPrimary 的 background 同色 → 悬停时整块黑掉。故这条要压在 :hover 之后。 */
+.dwBtnPrimary, .dwBtnPrimary:hover:not(:disabled) { background:var(--dsw-alias-label-primary); color:var(--dsw-alias-bg-layer-3); border-color:transparent }
+.dwBtnPrimary:hover:not(:disabled) { opacity:.85 }
 .dwPre { background:var(--dsw-alias-bg-layer-2); border-radius:8px; padding:8px; margin:6px 0; max-height:200px; overflow:auto; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-word; color:var(--dsw-alias-label-secondary) }
 .dwCheck { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--dsw-alias-label-secondary) }
 `;
@@ -121,24 +133,6 @@ window.__ModuleLoader__.load({
 		}
 		function Section(props) {
 			return e("div", { className: "dwSection" }, e("div", { className: "dwSectionTitle" }, props.title), props.hint ? e("div", { className: "dwHint" }, props.hint) : null, props.children);
-		}
-		function Chevron({ open }) {
-			return e("span", {
-				className: "dwChevron",
-				style: { transform: open ? "rotate(180deg)" : "none" }
-			}, e("svg", {
-				width: 16,
-				height: 16,
-				viewBox: "0 0 16 16",
-				fill: "none",
-				"aria-hidden": "true"
-			}, e("path", {
-				d: "M4 6l4 4 4-4",
-				stroke: "currentColor",
-				strokeWidth: 1.5,
-				strokeLinecap: "round",
-				strokeLinejoin: "round"
-			})));
 		}
 		function BundleRow(props) {
 			const b = props.bundle;
@@ -225,8 +219,8 @@ window.__ModuleLoader__.load({
 				}, "删除")
 			]);
 		}
-		function Card() {
-			const [open, setOpen] = react.default.useState(false);
+		/** 配置页：设置区块与 bundle 页面共用同一组件（`head` 只在前者渲染标题）。 */
+		function WikiPage(props) {
 			const [state, setState] = react.default.useState(null);
 			const [err, setErr] = react.default.useState("");
 			const [notice, setNotice] = react.default.useState("");
@@ -296,14 +290,10 @@ window.__ModuleLoader__.load({
 				}
 			}, []);
 			react.default.useEffect(() => {
-				if (!open) return;
+				if (!viewBundle) return;
 				loadSync(viewBundle);
 				setHealth(null);
-			}, [
-				open,
-				viewBundle,
-				loadSync
-			]);
+			}, [viewBundle, loadSync]);
 			const loadAuto = react.default.useCallback(async () => {
 				setAutoLoading(true);
 				try {
@@ -316,9 +306,8 @@ window.__ModuleLoader__.load({
 				}
 			}, []);
 			react.default.useEffect(() => {
-				if (!open) return;
 				loadAuto();
-			}, [open, loadAuto]);
+			}, [loadAuto]);
 			const autoRow = autoInfo && autoInfo.bundles ? autoInfo.bundles.find((b) => b.name === viewBundle) : null;
 			react.default.useEffect(() => {
 				if (autoRow) setAutoInterval(String(autoRow.intervalMinutes));
@@ -332,21 +321,7 @@ window.__ModuleLoader__.load({
 				await load();
 				await loadSync(viewBundle);
 			};
-			if (!open) {
-				const summary = state ? `默认：${state.active.name}（${state.active.path}）｜${state.entries.length} 个命名目录` : "展开以查看/管理知识库目录与同步";
-				return e("li", { className: "dwCard" }, e("button", {
-					type: "button",
-					className: "dwHeader",
-					"aria-expanded": "false",
-					onClick: () => setOpen(true)
-				}, e("span", { className: "dwHeadText" }, e("span", { className: "dwName" }, "llm-wiki 知识库"), e("span", { className: "dwDesc" }, summary)), e(Chevron, { open: false })));
-			}
-			return e("li", { className: "dwCard dwCardOpen" }, e("button", {
-				type: "button",
-				className: "dwHeader",
-				"aria-expanded": "true",
-				onClick: () => setOpen(false)
-			}, e("span", { className: "dwHeadText" }, e("span", { className: "dwName" }, "llm-wiki 知识库"), e("span", { className: "dwDesc" }, state ? `默认：${state.active.name}（${state.active.path}）` : "正在读取…")), e(Chevron, { open: true })), e("div", { className: "dwBody" }, err ? e("div", { className: "dwWarn" }, `✕ ${err}`) : null, notice ? e("div", { className: "dwOk" }, `✓ ${notice}`) : null, busy ? e("div", { className: "dwHint" }, "执行中…（首次同步要拉取上百个文件，约 1 分钟；请勿关闭页面，完成后自动刷新状态）") : null, e(Section, {
+			return e("div", { className: "dwPage" }, props.head === false ? null : e("div", { className: "dwHead" }, e("h2", { className: "dwTitle" }, "llm-wiki 知识库"), e("p", { className: "dwIntro" }, state ? `默认：${state.active.name}（${state.active.path}）｜${state.entries.length} 个命名目录` : "正在读取…")), err ? e("div", { className: "dwWarn" }, `✕ ${err}`) : null, notice ? e("div", { className: "dwOk" }, `✓ ${notice}`) : null, busy ? e("div", { className: "dwHint" }, "执行中…（首次同步要拉取上百个文件，约 1 分钟；请勿关闭页面，完成后自动刷新状态）") : null, e(Section, {
 				title: "命名目录（bundle）",
 				hint: `写入 ${state ? state.registryPath : "~/.agents/wiki-registry.json"}，与 CLI / pi 形态共享；删除只摘除注册，不动磁盘数据。`
 			}, state ? e("ul", { style: {
@@ -496,7 +471,7 @@ window.__ModuleLoader__.load({
 				className: "dwBtn",
 				disabled: busy || syncLoading,
 				onClick: () => loadSync(viewBundle)
-			}, syncLoading ? "读取中…" : "刷新状态")), isFeishu ? e("div", null, syncLoading && !sync ? e("div", { className: "dwHint" }, "正在读取飞书状态…（列远端目录，通常 2–5 秒）") : null, sync && sync.feishu && sync.feishu.ok ? e("div", null, e("div", { className: "dwHint" }, `待推送 ${sync.feishu.counts.push}｜待拉取 ${sync.feishu.counts.pull}｜冲突 ${sync.feishu.counts.conflict}｜本地 ${sync.feishu.counts.local} 个 .md，远端 ${sync.feishu.counts.remote} 个 .md`), activeEntry && activeEntry.folderUrl ? e("div", { className: "dwHint" }, `文件夹：${activeEntry.folderUrl}`) : null, activeEntry && activeEntry.cacheDir ? e("div", { className: "dwHint" }, `本地缓存：${activeEntry.cacheDir}`) : null, sync.feishu.ignored && sync.feishu.ignored.length ? e("div", { className: "dwHint" }, `已忽略的非 .md 资源：${sync.feishu.ignored.slice(0, 5).join("、")}`) : null) : null, sync && sync.feishu && sync.feishu.conflict && sync.feishu.conflict.length ? e("div", { className: "dwWarn" }, `冲突（两侧都改，需人工处理）：${sync.feishu.conflict.map((x) => x.rel).join("、")}`) : null, sync && sync.feishu && sync.feishu.duplicates && sync.feishu.duplicates.length ? e("div", { className: "dwWarn" }, `⚠ 远端同名重复：${sync.feishu.duplicates.map((x) => x.rel).join("、")}——飞书允许重名，工具不替你挑；请在飞书里删掉多余的那个（涉及该目录的推送会停下报错）。`) : null, sync && sync.feishu && sync.feishu.remoteDeleted && sync.feishu.remoteDeleted.length ? e("div", { className: "dwHint" }, `远端已删（本地保留）：${sync.feishu.remoteDeleted.join("、")}`) : null, !syncLoading && !(sync && sync.feishu && sync.feishu.ok) ? e("div", null, e("div", { className: "dwHint" }, sync && sync.feishu && sync.feishu.error || "飞书状态不可用（需要 lark-cli 已登录）"), sync && sync.feishu && sync.feishu.next ? e("div", { className: "dwHint" }, sync.feishu.next) : null) : null, e("div", { style: {
+			}, syncLoading ? "读取中…" : "刷新状态")), isFeishu ? e("div", null, syncLoading && !sync ? e("div", { className: "dwHint" }, "正在读取飞书状态…（列远端目录，通常 2–5 秒）") : null, sync && sync.feishu && sync.feishu.ok ? e("div", null, e("div", { className: "dwHint" }, `待推送 ${sync.feishu.counts.push}｜待拉取 ${sync.feishu.counts.pull}｜冲突 ${sync.feishu.counts.conflict}｜本地 ${sync.feishu.counts.local} 个 .md，远端 ${sync.feishu.counts.remote} 个 .md`), activeEntry && activeEntry.folderUrl ? e("div", { className: "dwHint" }, `文件夹：${activeEntry.folderUrl}`) : null, activeEntry && activeEntry.cacheDir ? e("div", { className: "dwHint" }, `本地缓存：${activeEntry.cacheDir}`) : null, sync.feishu.ignored && sync.feishu.ignored.length ? e("div", { className: "dwHint" }, `已忽略的非 .md 资源：${sync.feishu.ignored.slice(0, 5).join("、")}`) : null) : null, sync && sync.feishu && sync.feishu.conflict && sync.feishu.conflict.some((x) => !isDerived(x.rel)) ? e("div", { className: "dwWarn" }, `冲突（两侧都改，需人工处理）：${sync.feishu.conflict.filter((x) => !isDerived(x.rel)).map((x) => x.rel).join("、")}`) : null, sync && sync.feishu && sync.feishu.conflict && sync.feishu.conflict.some((x) => isDerived(x.rel)) ? e("div", { className: "dwHint" }, `派生文件两侧都变（一键同步自动处理：index.md 按本地目录树重生成、log.md 取并集）：${sync.feishu.conflict.filter((x) => isDerived(x.rel)).map((x) => x.rel).join("、")}`) : null, sync && sync.feishu && sync.feishu.duplicates && sync.feishu.duplicates.length ? e("div", { className: "dwWarn" }, `⚠ 远端同名重复：${sync.feishu.duplicates.map((x) => x.rel).join("、")}——飞书允许重名，工具不替你挑；请在飞书里删掉多余的那个（涉及该目录的推送会停下报错）。`) : null, sync && sync.feishu && sync.feishu.remoteDeleted && sync.feishu.remoteDeleted.length ? e("div", { className: "dwHint" }, `远端已删（本地保留）：${sync.feishu.remoteDeleted.join("、")}`) : null, !syncLoading && !(sync && sync.feishu && sync.feishu.ok) ? e("div", null, e("div", { className: "dwHint" }, sync && sync.feishu && sync.feishu.error || "飞书状态不可用（需要 lark-cli 已登录）"), sync && sync.feishu && sync.feishu.next ? e("div", { className: "dwHint" }, sync.feishu.next) : null) : null, e("div", { style: {
 				display: "flex",
 				gap: 8,
 				flexWrap: "wrap",
@@ -750,19 +725,22 @@ window.__ModuleLoader__.load({
 					const r = await post("/index", { bundle: viewBundle });
 					setNotice(`已重建 index：${r.files.length} 个文件`);
 				})
-			}, "重建 index")), health ? e("div", null, e("div", { className: "dwHint" }, `目录 ${health.tree.dirs} 个｜概念 ${health.tree.concepts} 个｜OKF ${health.validate.ok ? "合规 ✓" : `不合规（${health.validate.errors.length} 错 / ${health.validate.warnings.length} 警）`}｜断链 ${health.lint.summary.broken}｜过期 ${health.lint.summary.stale}｜孤儿 ${health.lint.summary.orphans}｜问题合计 ${health.lint.issues.length}`), health.validate.errors.length ? e("div", { className: "dwWarn" }, health.validate.errors.slice(0, 5).join("；")) : null, health.lint.issues.length ? e("div", { className: "dwPre" }, health.lint.issues.slice(0, 60).map((i) => `[${i.kind}] ${i.msg}`).join("\n")) : e("div", { className: "dwOk" }, "lint clean ✓")) : null)));
+			}, "重建 index")), health ? e("div", null, e("div", { className: "dwHint" }, `目录 ${health.tree.dirs} 个｜概念 ${health.tree.concepts} 个｜OKF ${health.validate.ok ? "合规 ✓" : `不合规（${health.validate.errors.length} 错 / ${health.validate.warnings.length} 警）`}｜断链 ${health.lint.summary.broken}｜过期 ${health.lint.summary.stale}｜孤儿 ${health.lint.summary.orphans}｜问题合计 ${health.lint.issues.length}`), health.validate.errors.length ? e("div", { className: "dwWarn" }, health.validate.errors.slice(0, 5).join("；")) : null, health.lint.issues.length ? e("div", { className: "dwPre" }, health.lint.issues.slice(0, 60).map((i) => `[${i.kind}] ${i.msg}`).join("\n")) : e("div", { className: "dwOk" }, "lint clean ✓")) : null));
 		}
 		function apply(ctx) {
 			const slots = ctx.get("slots");
 			if (slots === void 0) return;
 			injectStyles();
-			slots.inject("settings.plugin.item", () => slots.register({
-				name: "settings.plugin.item",
-				id: "dsh-wiki",
-				key: NS,
-				order: 40,
+			slots.inject("settings.section", () => slots.register({
+				name: "settings.section",
+				id: SECTION_ID,
+				order: SECTION_ORDER,
 				label: "llm-wiki 知识库"
-			}, () => e(Card)));
+			}, () => e(WikiPage, { head: true })));
+			slots.inject("plugins.bundle.config", () => slots.register({
+				name: "plugins.bundle.config",
+				key: BUNDLE
+			}, () => e(WikiPage, { head: false })));
 		}
 		//#endregion
 		exports.apply = apply;

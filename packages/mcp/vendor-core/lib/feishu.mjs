@@ -21,6 +21,8 @@
 
 import { execFile } from 'node:child_process'
 import { mkdir, readFile, writeFile, readdir, stat, copyFile, rm } from 'node:fs/promises'
+import { accessSync, constants } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
 import { expandTilde, writeRegistry, resolveBundleRoot, defaultCloudDir, normalizeCacheDir, effectiveBundles } from './registry.mjs'
 import { refreshIndex, mergeLogText } from './indexlog.mjs'
@@ -54,23 +56,71 @@ function byPath(a, b) {
   return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
 }
 
-function larkBin(opts = {}) {
-  return opts.larkBin || process.env.WIKI_LARK_BIN || 'lark-cli'
+/**
+ * lark-cli 落点：PATH 里没有它时的回退候选（用户级 npm 全局 bin + 常见系统前缀）。
+ * 需要它是因为宿主进程的 PATH 不由用户决定：macOS 上从 Finder/Dock 启动的 GUI 应用
+ * （如 DSH Desktop）只有 `/usr/bin:/bin:/usr/sbin:/sbin`，非交互 shell 同理，
+ * 于是 `spawn('lark-cli')` 报 ENOENT，而人手动敲命令却一切正常。
+ */
+function larkCandidates() {
+  return [
+    join(homedir(), '.local', 'bin', 'lark-cli'),
+    '/opt/homebrew/bin/lark-cli',
+    '/usr/local/bin/lark-cli',
+  ]
+}
+
+/** 可执行文件存在？（只挑真能跑的，避免挑到没有 +x 的残文件后报 EACCES 而非 ENOENT）。 */
+function runnable(path) {
+  try {
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 解析 lark-cli 可执行文件与它的运行 PATH。
+ *
+ * 为何不能只交给 spawn 查 PATH：宿主进程的 PATH 不由用户决定——macOS 上从 Finder/Dock
+ * 启动的 GUI 应用（如 DSH Desktop）只有 `/usr/bin:/bin:/usr/sbin:/sbin`，agent 的非交互
+ * shell 同理，于是 `spawn('lark-cli')` 报 ENOENT，而人手动敲命令却一切正常。
+ *
+ * 回退命中 `~/.local/bin/lark-cli` 这类 shim 时还要带上它的目录：npm 全局 bin 的
+ * `lark-cli` 是 `#!/usr/bin/env node` 脚本，PATH 里没有 `node` 会报
+ * `env: node: No such file or directory`——而同一个 npm 前缀下通常就装着 node。
+ *
+ * @param opts - `{ larkBin }` 显式路径（测试假桩 / 部署覆盖）。
+ * @returns `{ bin, path }`：传给 execFile 的名字或绝对路径，以及子进程该用的 PATH（无改动时为 null）。
+ */
+function resolveLarkCli(opts = {}) {
+  const explicit = opts.larkBin || process.env.WIKI_LARK_BIN
+  if (explicit) return { bin: explicit, path: null }
+  const path = String(process.env.PATH || '')
+  if (path.split(':').filter(Boolean).some((dir) => runnable(join(dir, 'lark-cli')))) return { bin: 'lark-cli', path: null }
+  for (const candidate of larkCandidates()) {
+    if (!runnable(candidate)) continue
+    const dir = dirname(candidate)
+    return { bin: candidate, path: path.split(':').includes(dir) ? null : [dir, path].filter(Boolean).join(':') }
+  }
+  return { bin: 'lark-cli', path: null }
 }
 
 /** 执行一条 lark-cli 命令；永不 reject。 */
 async function runLark(args, opts = {}) {
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : DEFAULT_TIMEOUT_MS
   return new Promise((resolve) => {
+    const lark = resolveLarkCli(opts)
     execFile(
-      larkBin(opts),
+      lark.bin,
       args,
       {
         cwd: opts.cwd || process.cwd(),
         timeout: timeoutMs,
         maxBuffer: 32 * 1024 * 1024,
         shell: false,
-        env: { ...process.env },
+        env: lark.path === null ? { ...process.env } : { ...process.env, PATH: lark.path },
       },
       (err, stdout, stderr) => {
         const out = String(stdout || '')
@@ -79,7 +129,7 @@ async function runLark(args, opts = {}) {
         const code = typeof err.code === 'number' ? err.code : null
         const ecode = typeof err.code === 'string' ? err.code : null
         let error
-        if (ecode === 'ENOENT') error = `未找到 lark-cli（${larkBin(opts)}）；安装后执行 lark-cli auth login，或用 WIKI_LARK_BIN 指定路径`
+        if (ecode === 'ENOENT') error = `未找到 lark-cli（${lark.bin}）；安装后执行 lark-cli auth login，或用 WIKI_LARK_BIN 指定路径`
         else if (err.killed || code === null) error = `lark-cli 执行超时（${timeoutMs}ms）：${args.slice(0, 3).join(' ')}`
         else error = (errText || out || `lark-cli ${args.slice(0, 3).join(' ')} 失败（exit ${code}）`).trim()
         resolve({ ok: false, code, error, stdout: out, stderr: errText, json: tryJson(out) })
@@ -372,6 +422,7 @@ export async function feishuStatus(spec, opts = {}) {
   const pull = []
   const conflict = []
   const remoteDeleted = []
+  const settled = [] // remoteModified 由内容裁决补上的条目（只动账本，不碰任何一侧的文件）
   const adopt = opts.adopt // 'local' | 'remote'：无索引记录（首次）时以哪一侧为准
 
   for (const [rel, lf] of local) {
@@ -388,7 +439,18 @@ export async function feishuStatus(spec, opts = {}) {
     }
     const localChanged = rec.localMtimeMs !== lf.mtimeMs || rec.localSize !== lf.size
     const remoteChanged = rec.remoteModified !== rf.modifiedTime
-    if (localChanged && remoteChanged) {
+    if (!localChanged && remoteChanged && !rec.remoteModified) {
+      // 账本没记下远端时间（remoteModified === 0）：推送后的那次列举失败/没跟上时留下的。
+      // 直接当「远端改了」会白拉一遍内容相同的文件（还会写 .backup），所以先用内容裁决：
+      // 一致 → 账本补上远端时间；不一致 → 走正常拉取（远端更新，符合「本机没动就跟远端」）。
+      const same = await sameContent(s, rel, rf, opts, id)
+      if (same === true) {
+        idx.files[rel] = { fileToken: rf.fileToken, remoteModified: rf.modifiedTime, localMtimeMs: lf.mtimeMs, localSize: lf.size }
+        settled.push(rel)
+        continue
+      }
+      pull.push({ rel, fileToken: rf.fileToken, modifiedTime: rf.modifiedTime })
+    } else if (localChanged && remoteChanged) {
       // 双侧「都变了」不等于内容真的分叉：另一台机器把**同样的内容**重推一次，
       // 会让远端 modified_time 变新；本机随后拉取又会让本地 mtime/size 变新，
       // 于是账本两侧都不匹配 → 假冲突（5 楼实测 4 个文件两侧逐字节相同却被判冲突，
@@ -408,6 +470,7 @@ export async function feishuStatus(spec, opts = {}) {
   for (const rel of Object.keys(idx.files)) {
     if (!remote.files.has(rel) && !local.has(rel)) remoteDeleted.push(rel)
   }
+  if (settled.length) await writeIndex(s.cacheDir, idx) // 只补账本，不碰两侧文件、不动 lastSyncAt
 
   return {
     ok: true,
@@ -572,15 +635,22 @@ export async function feishuPush(spec, opts = {}) {
   }
   idx.lastSyncAt = new Date().toISOString()
   await writeIndex(s.cacheDir, idx)
-  // 新建/覆盖后刷新远端 modified_time（一次列举即可）
-  const after = await feishuListRemote(s, opts)
-  if (after.ok) {
-    for (const rel of pushed) {
+  // 新建/覆盖后刷新远端 modified_time：列举要走完所有目录，任何一层瞬时失败（限流/网络）
+  // 整次就作废；只试一次会让刚推上去的文件全留在 remoteModified=0，下一次 status 把它们
+  // 判成「远端改了」白拉一遍。故重试几轮，直到推过的文件都在列举里（或放弃 → 留 0，安全兜底）。
+  const pending = new Set(pushed)
+  for (let attempt = 0; attempt < 3 && pending.size; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
+    const after = await feishuListRemote(s, opts)
+    if (!after.ok) continue
+    for (const rel of [...pending]) {
       const rf = after.files.get(rel)
-      if (rf) idx.files[rel] = { ...idx.files[rel], fileToken: rf.fileToken, remoteModified: rf.modifiedTime }
+      if (!rf) continue
+      idx.files[rel] = { ...idx.files[rel], fileToken: rf.fileToken, remoteModified: rf.modifiedTime }
+      pending.delete(rel)
     }
-    await writeIndex(s.cacheDir, idx)
   }
+  if (pending.size !== pushed.length) await writeIndex(s.cacheDir, idx)
   return { ok: failed.length === 0, pushed, created, dirs: dirs.created, failed }
 }
 

@@ -1,11 +1,12 @@
 /**
  * tests/dsh-config-test.mjs —— DSH 宿主半配置界面验收（mock 宿主，无需 dsh 运行时）。
  *
- * 覆盖：设置命名空间注册（dsh-wiki + schema + base 层）、/api/dsh-wiki/* 路由、
- * 命名 bundle 增删改名/设默认（与 core 注册表一致）、参数保存（写设置层并即时生效）、
- * 体检/重建 index、git 状态与错误指引、服务缺席时的优雅降级。
+ * 覆盖：/api/dsh-wiki/* 路由、命名 bundle 增删改名/设默认（与 core 注册表一致）、
+ * 体检/重建 index、git 状态与错误指引、可选服务缺席时的优雅降级。
  *
- * schemastery 未安装（cd packages/dsh && pnpm install）时，依赖设置服务的两节自动 skip。
+ * 页面侧（客户端半）见 tests/dsh-client-bundle-test.mjs；宿主半不再注册设置命名空间
+ * （DSH 0.1.7 起 settings 服务改为按 profile 条目 schema 生成表单，旧「插件配置 Tab +
+ * 已服务命名空间 ∩ 已注册卡片」机制整体移除）。
  */
 
 import { mkdtemp, cp, rm, readFile, access, mkdir, writeFile } from 'node:fs/promises'
@@ -22,29 +23,23 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 const plugin = await import(join(ROOT, 'packages', 'dsh', 'wiki.mjs'))
 
-const schemasteryOk = await access(join(ROOT, 'packages', 'dsh', 'node_modules', 'schemastery', 'package.json')).then(() => true, () => false)
-const noSchema = schemasteryOk ? false : 'schemastery 未安装（cd packages/dsh && pnpm install）'
-
-/** 最小 host mock：on / tools / inject / get + 假 settings / webServer 服务。 */
-function makeCtx({ settingsLive = true } = {}) {
+/** 最小 host mock：on / tools / inject / get + 假 webServer 服务。 */
+function makeCtx({ webLive = true } = {}) {
   const tools = new Map()
   const handlers = {}
   const routes = new Map()
-  const registered = []
   const services = {}
 
-  if (settingsLive) {
-    // 插件只调 register()（空 schema，仅作卡片可见性钥匙）；返回的 scope 不被使用
-    services.settings = { register(ns, schema, opts) { registered.push({ ns, schema, opts }); return {} } }
-  }
-  services.webServer = {
-    register(r) {
-      // 宿主按路径匹配：同一路径重复注册 = 后注册覆盖前者（真实宿主同样只认一条）
-      if (routes.has(r.path)) throw new Error(`重复注册路由 ${r.path}（同一路径只能一条，method 在 handler 内分派）`)
-      assert.equal(r.kind, 'exact')
-      routes.set(r.path, r)
-      return () => {}
-    },
+  if (webLive) {
+    services.webServer = {
+      register(r) {
+        // 宿主按路径匹配：同一路径重复注册 = 后注册覆盖前者（真实宿主同样只认一条）
+        if (routes.has(r.path)) throw new Error(`重复注册路由 ${r.path}（同一路径只能一条，method 在 handler 内分派）`)
+        assert.equal(r.kind, 'exact')
+        routes.set(r.path, r)
+        return () => {}
+      },
+    }
   }
 
   const scoped = { get: (name) => services[name] }
@@ -55,7 +50,7 @@ function makeCtx({ settingsLive = true } = {}) {
     get: (name) => services[name],
     logger: { warn() {}, error() {} },
   }
-  return { ctx, tools, handlers, routes, registered, scoped, services }
+  return { ctx, tools, handlers, routes, scoped, services }
 }
 
 /** 事件先缓冲、有监听者再投递（handler 首个 await 之后才挂 data/end 监听，时序不能假设）。 */
@@ -101,7 +96,7 @@ async function callRoute(route, { method = 'GET', url = route.path, body } = {})
 
 const settle = () => new Promise((r) => setTimeout(r, 60))
 
-describe('DSH 插件配置卡片（宿主半）', () => {
+describe('DSH 配置页（宿主半）', () => {
   let tmp
   let demo
   let regFile
@@ -206,7 +201,6 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     assert.equal(demoEntry.shadowed, true, 'config 与注册表同名时应标记 shadowed')
     assert.equal(demoEntry.isBundle, true)
     assert.equal(r.body.active.name, 'demo')
-    assert.equal(r.body.settingsNamespace, 'dsh-wiki')
     assert.equal(r.body.config, undefined, '运行参数不应再出现在 /state 里')
   })
 
@@ -461,29 +455,18 @@ describe('DSH 插件配置卡片（宿主半）', () => {
     }
   })
 
-  test('settings 服务缺席时：不注册命名空间（卡片不出现），工具与 RPC 照常', async () => {
-    const bare = makeCtx({ settingsLive: false })
+  test('webServer 缺席（非 web 部署）：不注册路由，工具与注入照常', async () => {
+    const bare = makeCtx({ webLive: false })
     plugin.apply(bare.ctx, { dataDir: demo, dataDirs: { demo } })
     await settle()
-    assert.equal(bare.registered.length, 0)
+    assert.equal(bare.routes.size, 0)
     assert.equal(bare.tools.size, 14)
-    assert.ok(bare.routes.has('/api/dsh-wiki/state') && bare.routes.has('/api/dsh-wiki/sync'))
-    const st = await callRoute(bare.routes.get('/api/dsh-wiki/state'))
-    assert.equal(st.body.ok, true)
+    const list = await bare.tools.get('wiki_list').execute({})
+    assert.match(list.text, /demo/)
   })
 
-  describe('设置命名空间（需 schemastery）', { skip: noSchema }, () => {
-    test('注册 dsh-wiki 命名空间：空 schema，仅作为卡片可见性钥匙', () => {
-      assert.equal(mock.registered.length, 1, JSON.stringify(mock.registered))
-      const { ns, schema, opts } = mock.registered[0]
-      assert.equal(ns, 'dsh-wiki')
-      assert.equal(opts.applies, 'live')
-      assert.equal(opts.base, undefined, '运行参数已不再作为设置层 base 注入')
-      // schemastery 的 Schema 实例可调用（宿主会 schema(value) + schema.toJSON()）
-      assert.ok(schema && (typeof schema === 'object' || typeof schema === 'function'))
-      assert.equal(typeof schema, 'function')
-      assert.equal(typeof schema.toJSON, 'function')
-      assert.deepEqual(schema({ 未知字段: 1 }), { 未知字段: 1 }, '空 schema 不应拒绝未知键（旧分节不会导致注册失败）')
-    })
+  test('宿主半不注册设置命名空间（旧卡片钥匙随 DSH 0.1.7 移除）', () => {
+    assert.equal(mock.services.settings, undefined)
+    assert.deepEqual(Object.keys(mock.services), ['webServer'])
   })
 })

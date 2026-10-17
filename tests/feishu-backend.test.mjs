@@ -127,6 +127,33 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
     }
   })
 
+  test('宿主 PATH 精简（GUI 启动/非交互 shell）时回退到 ~/.local/bin，并给它带上 node 的 PATH', async () => {
+    // 复刻真实症状：macOS 从 Finder 启动的应用 PATH 只有 /usr/bin:/bin:/usr/sbin:/sbin，
+    // 而 lark-cli 装在 ~/.local/bin（`#!/usr/bin/env node` 的 shim，还需要 PATH 里有 node）。
+    const fakeHome = await mkdtemp(join(tmpdir(), 'wiki-home-'))
+    const binDir = join(fakeHome, '.local', 'bin')
+    await mkdir(binDir, { recursive: true })
+    await cp(FAKE, join(binDir, 'lark-cli'))
+    await chmod(join(binDir, 'lark-cli'), 0o755)
+    await writeFile(join(binDir, 'node'), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, { mode: 0o755 })
+
+    const prev = { HOME: process.env.HOME, PATH: process.env.PATH, WIKI_LARK_BIN: process.env.WIKI_LARK_BIN }
+    delete process.env.WIKI_LARK_BIN
+    process.env.HOME = fakeHome
+    process.env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
+    try {
+      const r = await core.larkAvailable()
+      assert.equal(r.ok, true, `精简 PATH 下应回退到 ~/.local/bin，实际：${r.error || JSON.stringify(r)}`)
+      assert.equal(r.user.ready, true)
+    } finally {
+      if (prev.HOME === undefined) delete process.env.HOME
+      else process.env.HOME = prev.HOME
+      process.env.PATH = prev.PATH
+      process.env.WIKI_LARK_BIN = prev.WIKI_LARK_BIN
+      await rm(fakeHome, { recursive: true, force: true })
+    }
+  })
+
   test('feishuInit --new-folder：建目录 + 注册对象 spec + 默认 cacheDir 落到 wiki-cloud', async () => {
     const r = await core.feishuInit({ name: '飞书库', newFolder: '团队知识库', use: true })
     assert.equal(r.ok, true, JSON.stringify(r))
@@ -181,6 +208,61 @@ describe('飞书在线知识库后端（假 lark-cli）', () => {
     const st = await readState(stateFile)
     assert.match(st.files['a.md'].content, /A 改过/)
     assert.equal(st.files['b.md'].content.includes('改过'), false)
+  })
+
+  test('账本缺远端时间（推送后列举没跟上）：内容一致就补账本，不白拉一遍', async () => {
+    await writeLocal('a.md', 'same\n')
+    assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)
+    // 复刻症状：推送成功但那次列举失败 → 账本留下 remoteModified=0
+    const ledger = join(cacheDir, '.wiki-cloud.json')
+    const idx = JSON.parse(await readFile(ledger, 'utf8'))
+    idx.files['a.md'].remoteModified = 0
+    await writeFile(ledger, JSON.stringify(idx, null, 2))
+    const remoteBefore = (await readState(stateFile)).files['a.md'].modified
+
+    const st = await core.feishuStatus(spec())
+    assert.deepEqual(st.pull.map((x) => x.rel), [], '内容一致时不该报待拉取')
+    const after = JSON.parse(await readFile(ledger, 'utf8'))
+    assert.ok(after.files['a.md'].remoteModified, '账本应补上远端时间戳')
+    assert.equal(after.files['a.md'].remoteModified, remoteBefore)
+    assert.equal((await readState(stateFile)).files['a.md'].modified, remoteBefore, '不应动远端')
+    assert.equal(await readFile(join(cacheDir, 'a.md'), 'utf8'), 'same\n', '不应动本地')
+  })
+
+  test('账本缺远端时间但内容真的不同：仍走拉取（远端更新）', async () => {
+    await writeLocal('a.md', 'v1\n')
+    assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)
+    const ledger = join(cacheDir, '.wiki-cloud.json')
+    const idx = JSON.parse(await readFile(ledger, 'utf8'))
+    idx.files['a.md'].remoteModified = 0
+    await writeFile(ledger, JSON.stringify(idx, null, 2))
+    await touchRemote('a.md', { content: 'remote v2\n' })
+
+    const st = await core.feishuStatus(spec())
+    assert.deepEqual(st.pull.map((x) => x.rel), ['a.md'])
+  })
+
+  test('推送后的远端时间戳刷新遇瞬时列举失败会重试（限流不再留下一批 0）', async () => {
+    await writeLocal('c.md', 'c\n')
+    assert.equal((await core.feishuSync(spec(), { adopt: 'local' })).ok, true)
+    const ledger = join(cacheDir, '.wiki-cloud.json')
+    const idx = JSON.parse(await readFile(ledger, 'utf8'))
+    delete idx.files['c.md']
+    idx.files['c.md'] = { fileToken: (await readState(stateFile)).files['c.md'].fileToken, remoteModified: 0, localMtimeMs: 0, localSize: 0 }
+    await writeFile(ledger, JSON.stringify(idx, null, 2))
+    await writeLocal('c.md', 'c2\n')
+
+    const prev = process.env.FAKE_LARK_LIST_FAIL_NTH
+    process.env.FAKE_LARK_LIST_FAIL_NTH = '2' // 推送后的那次列举失败，重试那次成功
+    try {
+      const r = await core.feishuPush(spec(), { paths: ['c.md'] })
+      assert.equal(r.ok, true, JSON.stringify(r))
+      const after = JSON.parse(await readFile(ledger, 'utf8'))
+      assert.ok(after.files['c.md'].remoteModified, '重试后应记上真实远端时间戳')
+    } finally {
+      if (prev === undefined) delete process.env.FAKE_LARK_LIST_FAIL_NTH
+      else process.env.FAKE_LARK_LIST_FAIL_NTH = prev
+    }
   })
 
   test('远端被改：拉取覆盖本地并留下 .backup 备份', async () => {

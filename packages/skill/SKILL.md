@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 0.6.3
+version: 0.7.2
 description: >-
   工作知识库（OKF v0.2 markdown bundle，用 `wiki` CLI 读写）：收录某个团队/领域**反复要用到的知识**
   ——事实与结构、约定与口径、流程与规范、经验与坑点。**以下情况先用本 skill 查库，不要凭记忆或印象回答**：

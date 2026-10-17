@@ -1,6 +1,6 @@
 {
   "name": "@sidleo3/mcp-wiki",
-  "version": "0.6.3",
+  "version": "0.7.2",
   "description": "MCP server for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle exposed over stdio. Registers the same 14 wiki_* tools as the DSH and Codex plugins (list/search/get/create/update/validate/lint/ingest/deprecate/rules/help/dirs/use/sync) and delivers the bundle + per-directory APPEND_SYSTEM_PROMPT.md rules through the MCP `instructions` field, so any MCP-capable agent (Claude Code / Cursor / Codex …) gets plugin-like behaviour. Fully local, self-contained (vendor-core embedded).",
   "type": "module",
   "bin": {
@@ -19,7 +19,7 @@
   },
   "scripts": {
     "sync-vendor": "node scripts/sync-vendor.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs && node --test ../../tests/vendor-sync.test.mjs",
     "prepack": "node scripts/sync-vendor.mjs"
   },
   "dependencies": {

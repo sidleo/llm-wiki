@@ -41,6 +41,7 @@ const ROOT = process.env.FAKE_LARK_ROOT || 'fldcnROOT'
  *                             用于测「列举通过、单文件写被拒」这条分支
  *   FAKE_LARK_DENY_FETCH=1  → 只让 markdown +fetch 失败（列举仍可读），
  *                             用于测「双侧都变但读不到远端内容」时的保守回退
+ *   FAKE_LARK_LIST_FAIL_NTH=n → 每第 n 次 drive files list 失败一次（模拟限流致整次列举作废）
  */
 const AS = (() => {
   const i = argv.indexOf('--as')
@@ -170,6 +171,18 @@ if (deny || (denyWriteOnly && WRITE_CMDS.includes(cmd))) fail(denyMessage, AS ==
 if (denyFetch && domain === 'markdown' && cmd === '+fetch') fail('fetch unavailable (FAKE_LARK_DENY_FETCH)', 'api_error')
 
 if (domain === 'drive' && cmd === 'files' && argv[2] === 'list') {
+  // FAKE_LARK_LIST_FAIL_NTH=n：每第 n 次列举失败一次（模拟限流/瞬时故障下整次列举作废）。
+  // 计数落在状态文件里，因为每条命令都是一个新进程。
+  const nth = Number(process.env.FAKE_LARK_LIST_FAIL_NTH || 0)
+  if (nth > 0) {
+    acquireLock()
+    const counted = load()
+    counted.listCalls = (counted.listCalls || 0) + 1
+    save(counted)
+    const hit = counted.listCalls % nth === 0
+    releaseLock()
+    if (hit) fail('too many requests (FAKE_LARK_LIST_FAIL_NTH)', 'rate_limit')
+  }
   const params = JSON.parse(flag('--params') || '{}')
   const folderToken = params.folder_token === undefined ? '' : params.folder_token
   const rel = folderToken === '' ? '' : relOfDirToken(st, folderToken)

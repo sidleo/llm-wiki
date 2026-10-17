@@ -1,6 +1,6 @@
 {
   "name": "codex",
-  "version": "0.6.3+codex.20260921021136",
+  "version": "0.7.2+codex.20260927145913",
   "description": "Use the local OKF v0.2 llm-wiki knowledge bundle in Codex through 14 wiki tools, a bundled skill, and fresh directory-rule injection.",
   "author": {
     "name": "sidleo"

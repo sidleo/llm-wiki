@@ -65,6 +65,7 @@ async function main() {
     && !/\d+ concepts/.test(section.text)
     && !/共 \d+ 个概念/.test(section.text), section && section.text.slice(0, 160))
   check('会话层快照含数据源路径', context && context.text.includes(tmp), (context && context.text.slice(0, 160)) || 'no context')
+  check('会话层 context 带 interpolate:false（APPEND 里的 {{...}} 保持字面量）', context && context.interpolate === false)
   check('会话层不含概念计数（高频 churn 源已移出）', context
     && !/\d+ concepts/.test(context.text)
     && !/共 \d+ 个概念/.test(context.text), context && context.text.slice(0, 200))

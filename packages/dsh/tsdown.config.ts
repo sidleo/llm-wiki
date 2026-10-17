@@ -15,7 +15,7 @@ const PLATFORM_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-do
  *
  * 产物 = lib/client.js：CJS 工厂包一层 `window.__ModuleLoader__.load({ id, factory })`，
  * 导出 `inject`（cordis 服务名）+ `apply(ctx)`，由 DSH 的 client-modules 经 /plugins 提供。
- * 格式契约（DSH 0.1.5-rc.2）：
+ * 格式契约（DSH 0.1.7-rc.2，与 0.1.5 相同；0.2.0-rc.1 复核一致——dsh-client-modules 两版字节相同）：
  *   - 经典脚本、无顶层 ESM 语法；
  *   - 第一行必须是 load 调用（多了 "use strict" 前缀该行会认不出来）；
  *   - factory 内 require 走模块表，返回值是 module.exports。

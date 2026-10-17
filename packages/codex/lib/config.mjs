@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 
 /** 插件版本（写入门控的 producer 版本、MCP initialize 的 serverInfo 版本）。 */
-export const MCP_VERSION = '0.6.3'
+export const MCP_VERSION = '0.7.2'
 
 /** 写入记录里的 producer 标识（区分第五形态）。 */
 export const PRODUCER = 'codex-wiki'

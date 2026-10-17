@@ -58,7 +58,13 @@ async function loadCore() {
 }
 
 /** CLI 版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const CLI_VERSION = '0.6.3'
+const CLI_VERSION = '0.7.2'
+
+/**
+ * 输出字符上限（与 dsh 插件 maxGetChars 同值）。CLI 无宿主上限，这里只为防
+ * 「超长输出被终端/管道截断却无提示」——截断一律走 core.truncateByLine（按整行 + 明示省略）。
+ */
+const MAX_OUT_CHARS = 40000
 
 function dataDirFromArgs(argv) {
   const i = argv.indexOf('--dataDir')
@@ -236,17 +242,16 @@ async function main() {
   const isFeishu = resolvedBundle.kind === 'feishu'
   const resolved = resolvedBundle
 
-  const fmtTitle = (c) => `${c.strong ? '★' : ''}${c.type}: ${c.title}  (${c.id})\n    ${c.description || ''}`
+  const fmtTitle = (c) => `${core.formatConceptRef(dataDir, c, { typePrefix: c.strong ? '★' : '' })}\n    ${c.description || ''}`
 
   switch (cmd) {
     case 'list': {
-      const tree = await core.listBundle(dataDir, { type: arg(rest, '--type'), status: arg(rest, '--status') })
-      for (const { dir, concepts } of tree) {
-        console.log(`\n[${dir || '(root)'}]`)
-        for (const c of concepts) console.log(`  ${c.type}: ${c.title}  (${c.id})${c.status === 'deprecated' ? ' [deprecated]' : ''}`)
-      }
-      const total = tree.reduce((n, t) => n + t.concepts.length, 0)
-      console.log(`\n${total} concepts`)
+      const listType = arg(rest, '--type')
+      const listStatus = arg(rest, '--status')
+      const tree = await core.listBundle(dataDir, { type: listType, status: listStatus })
+      if (!tree.length) { console.log('知识库为空或过滤后无概念'); break }
+      const scopeNote = [listType ? `type=${listType}` : '', listStatus ? `status=${listStatus}` : ''].filter(Boolean).join(' ')
+      console.log(core.truncateByLine(core.renderOverview(tree, { scopeNote }), MAX_OUT_CHARS))
       break
     }
     case 'search': {
@@ -271,12 +276,12 @@ async function main() {
       const got = await core.getConcept(dataDir, id)
       if (!got) { console.error(`未找到: ${id}。若这是真实表/概念可用 wiki create 主动补录。`); process.exit(1) }
       if (got.ambiguous) { console.error(`标题「${id}」有多个候选: ${got.candidates.join(', ')}`); process.exit(1) }
-      console.log(`# ${got.title}  (${got.id})`)
+      console.log(`${core.formatConceptRef(dataDir, got, { typePrefix: '# ' })}`)
       console.log(`type: ${got.type} | status: ${got.meta.status || 'stable'}`)
       if (got.meta.runtime) console.log(`runtime: ${got.meta.runtime}`)
       if (got.desc) console.log(`\n${got.desc}`)
       console.log(`\n--- backlinks (${got.backlinks.length}) ---`)
-      for (const b of got.backlinks) console.log(`  ${b.type}: ${b.title}  (${b.id})`)
+      for (const b of got.backlinks) console.log(`  ${core.formatConceptRef(dataDir, b)}`)
       console.log(`\n--- body ---\n${got.body.trim()}`)
       console.log(await rulesAppendix(core, dataDir, dirOfId(got.id)))
       break
@@ -304,7 +309,8 @@ async function main() {
         body: bodyFrom(arg(rest, '--body') || ''),
         opts: { confirmed: has(rest, '--confirmed'), user: process.env.WIKI_USER, producer: 'wiki-cli', version: CLI_VERSION },
       })
-      console.log(`created ${out.id}${await onlineFlush(core, dataDir)}`)
+      const abs = core.conceptLinkTarget(dataDir, out.id)
+      console.log(`created ${out.id}${abs ? `  ->  ${abs}` : ''}${await onlineFlush(core, dataDir)}`)
       console.log(await rulesAppendix(core, dataDir, dirOfId(out.id)))
       break
     }
@@ -321,7 +327,8 @@ async function main() {
       const blocked = await onlineGuard(core, dataDir, [`${id}.md`])
       if (blocked) { console.error(blocked); process.exit(2) }
       await core.updateConcept(dataDir, id, patch)
-      console.log(`updated ${id}${await onlineFlush(core, dataDir)}`)
+      const updatedAbs = core.conceptLinkTarget(dataDir, id)
+      console.log(`updated ${id}${updatedAbs ? `  ->  ${updatedAbs}` : ''}${await onlineFlush(core, dataDir)}`)
       console.log(await rulesAppendix(core, dataDir, dirOfId(id)))
       break
     }

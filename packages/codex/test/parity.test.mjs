@@ -22,7 +22,7 @@ describe('Codex 与 MCP/DSH 工具契约对拍', () => {
     await cp(DEMO, tmp, { recursive: true })
     const core = await loadCodexCore()
     const config = { dataDir: tmp }
-    codex = createCodexWiki({ core, config, version: '0.6.3', producer: 'codex-wiki' })
+    codex = createCodexWiki({ core, config, version: '0.7.2', producer: 'codex-wiki' })
     mcp = createMcpWiki({ core, config })
   })
 

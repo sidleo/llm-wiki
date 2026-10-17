@@ -22,7 +22,7 @@ describe('Codex plugin 结构', () => {
   test('manifest 声明 skill 与内置 MCP，且字段可被 plugin-creator 接受', async () => {
     const plugin = await readJson(join(ROOT, '.codex-plugin', 'plugin.json'))
     assert.equal(plugin.name, 'codex')
-    assert.match(plugin.version, /^0\.6\.3(?:\+codex\..+)?$/)
+    assert.match(plugin.version, /^0\.7\.2(?:\+codex\..+)?$/)
     assert.equal(plugin.skills, './skills/')
     assert.equal(plugin.mcpServers, './.mcp.json')
     assert.deepEqual(plugin.interface.capabilities, ['Read', 'Write'])

@@ -1,7 +1,7 @@
 {
   "name": "@sidleo3/dsh-wiki",
-  "version": "0.6.3",
-  "description": "DSH plugin for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle with progressive disclosure. Registers 14 tools: wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules/help/dirs/use/sync. Named multi-bundle directories with session/global switching, Git remote sync + Feishu cloud-drive online knowledge base (native .md), and a Settings → Plugins → Plugin configuration card (bundle registry / runtime params / sync / health). Self-contained (vendor-core embedded).",
+  "version": "0.7.5",
+  "description": "DSH plugin for the llm-wiki knowledge base: OKF v0.2-conformant markdown bundle with progressive disclosure. Registers 14 tools: wiki_list/search/get/create/update/validate/lint/ingest/deprecate/rules/help/dirs/use/sync. Named multi-bundle directories with session/global switching, Git remote sync + Feishu cloud-drive online knowledge base (native .md), and a configuration page registered into the DSH slots settings.section (Settings → llm-wiki) and plugins.bundle.config (sidebar Plugins → bundle page), both unchanged across DSH 0.1.7-rc.2, 0.2.0-rc.1 and 0.2.1-rc.2: bundle registry / sync / health. Self-contained (vendor-core embedded).",
   "type": "module",
   "main": "wiki.mjs",
   "exports": {
@@ -22,12 +22,10 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "dsh": ">=0.1.7-rc.2"
   },
   "dsh": {
-    "engines": {
-      "dsh": ">=0.1.5-rc.1"
-    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -37,9 +35,6 @@
         "@deepseek-ai/dsh-client-ui-slots"
       ]
     }
-  },
-  "dependencies": {
-    "schemastery": "^3.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

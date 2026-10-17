@@ -38,7 +38,7 @@ describe('Codex MCP 服务端', () => {
       encoding: 'utf8',
     })
     assert.equal(r.status, 0, r.stderr)
-    assert.match(r.stdout, /wiki-mcp 0\.6\.3/)
+    assert.match(r.stdout, /wiki-mcp 0\.7\.2/)
     assert.match(r.stdout, /先核对结构/)
     assert.match(r.stdout, /wiki_list/)
     assert.match(r.stdout, new RegExp(`--- tools（${TOOL_NAMES.length}）---`))
@@ -81,7 +81,13 @@ describe('Codex MCP 服务端', () => {
     assert.deepStrictEqual(list.result.tools.map((t) => t.name).sort(), [...TOOL_NAMES].sort())
 
     const call = frames.find((f) => f.id === 3)
-    assert.match(call.result.content[0].text, /共 11 个概念/)
+    // wiki_list 渲染「全量清单」：逐条列出标题 + [type]（不含绝对路径），
+    // 概念总数以首行计数行表达，并断言 11 个条目全部逐条列出。
+    assert.match(call.result.content[0].text, /知识库清单（\d+ 个目录 \/ 11 个概念）/)
+    assert.equal(
+      call.result.content[0].text.split('\n').filter((l) => /^\s+·\s+/.test(l)).length, 11,
+      '全量清单应逐条列出 11 个条目')
+    assert.ok(!call.result.content[0].text.includes('->'), '清单不含绝对路径')
 
     const unknown = frames.find((f) => f.id === 4)
     assert.equal(unknown.result.isError, true)

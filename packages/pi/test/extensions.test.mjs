@@ -78,10 +78,21 @@ describe("pi-wiki extension", () => {
     assert.match(r.text, /OKF v0\.2 合规/);
   });
 
-  test("wiki_list 列概念", async () => {
+  test("wiki_list 给全量清单（标题 + type，不含绝对路径）", async () => {
     const r = await run("wiki_list");
-    assert.match(r.text, /tables\/orders/);
-    assert.match(r.text, /computations\/revenue/);
+    assert.match(r.text, /知识库清单（\d+ 个目录 \/ 11 个概念）/);
+    assert.match(r.text, /^tables  — 3 个/m);
+    assert.match(r.text, /【怎么用】/);
+    // 全量：11 个条目一行一条，无示例省略，且不含绝对路径
+    assert.equal(r.text.split("\n").filter((l) => /^\s+·\s+/.test(l)).length, 11);
+    assert.ok(!/另\s*\d+\s*个/.test(r.text), "全量清单不该有「另 N 个」省略");
+    assert.ok(!r.text.includes("->"), "清单不含绝对路径");
+  });
+
+  test("wiki_list 过滤时标注 scopeNote", async () => {
+    const r = await run("wiki_list", { type: "Table" });
+    assert.match(r.text, /筛选：type=Table/);
+    assert.match(r.text, /3 个概念/);
   });
 
   test("wiki_get 附 backlinks 坑点", async () => {
@@ -188,7 +199,7 @@ describe("pi-wiki extension", () => {
       const w = await run("wiki_use", { name: "default", global: true });
       assert.match(w.text, /default/);
       const l = await run("wiki_list", {});
-      assert.match(l.text, /tables\/orders/, "切换后仍能读 bundle");
+      assert.match(l.text, /知识库清单/, "切换后仍能读 bundle");
     } finally {
       if (prev === undefined) delete process.env.WIKI_REGISTRY_FILE;
       else process.env.WIKI_REGISTRY_FILE = prev;

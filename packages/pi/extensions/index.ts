@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 扩展版本（写入门控的 producer 版本；随 package.json 同步）。 */
-const PI_VERSION = "0.6.3";
+const PI_VERSION = "0.7.2";
 
 // 加载 core：优先同包 vendor-core（复制安装/自包含），回退本仓库 packages/core（开发态）
 let corePromise: Promise<any> | null = null;
@@ -51,6 +51,93 @@ const listVal = (v: unknown): string[] =>
     ? []
     : String(v).split(/\s*,\s*/).filter(Boolean);
 
+/**
+ * 输出上限（与 DSH 形态的 maxGetChars 默认一致）。
+ * pi 原先没有上限、直接整段返回，概览远小于它；接上截断只为兜住「目录/示例极多」的极端
+ * 情况，且截断时**必定自述**（core 的 truncateByLine 保证），不静默丢内容。
+ */
+const MAX_GET_CHARS = 40000;
+
+/**
+ * 按整行截断兜底（概念行含长路径，字符级 slice 会切出半条路径）。
+ * 旧 vendor 缺该函数时退回原样返回——概览本身远低于上限，不发提示比切断半行安全。
+ */
+function truncateOut(core: any, text: string): string {
+  if (typeof core.truncateByLine === "function") {
+    try {
+      return core.truncateByLine(text, MAX_GET_CHARS);
+    } catch {
+      // 见上：退回原样
+    }
+  }
+  return text;
+}
+
+/**
+ * 目录概览渲染（方案 A，见 core/lib/overview.mjs）。
+ *
+ * 平铺全部条目会撞宿主输出上限被**字符级硬切**（真实库 364 概念只完整给出 184 个，
+ * 180 个静默丢失），而 wiki_list 的定位是「第一步看全貌」——给半份且不说比不给更危险。
+ * pi 形态本身没有 maxGetChars，但仍统一走概览：五形态输出语义一致，模型换宿主不会看到
+ * 两套「全貌」。`renderOverview` 同样来自 vendor / 开发态 core，旧 vendor 快照可能缺失 →
+ * 退回平铺（不抛错）。
+ */
+function renderOverview(core: any, tree: any, scopeNote: string): string {
+  if (typeof core.renderOverview === "function") {
+    try {
+      return core.renderOverview(tree, scopeNote ? { scopeNote } : {});
+    } catch {
+      // 渲染失败退回平铺（见下）
+    }
+  }
+  const dirs: any[] = Array.isArray(tree) ? tree : [];
+  const lines: string[] = [];
+  for (const t of dirs) {
+    lines.push(`[${t.dir || "(root)"}]`);
+    for (const c of t.concepts || []) {
+      lines.push(`  ${c.type ? `${c.type}: ` : ""}${c.title || ""}  (${c.id || ""})${c.status === "deprecated" ? " [deprecated]" : ""}`);
+    }
+  }
+  lines.push(`\n共 ${dirs.reduce((n, t) => n + (t.concepts ? t.concepts.length : 0), 0)} 个概念。`);
+  return lines.join("\n");
+}
+
+/**
+ * 概念行渲染：`type: title  (id)  ->  </abs/path.md>`（见 core/lib/ref.mjs 的来由：
+ * 工具只给 bundle 相对 id，宿主会把它当 cwd 相对路径 → bundle 挂在 cwd 之外时必死链）。
+ *
+ * `formatConceptRef` 来自 vendor-core / 开发态 core——自包含安装的 vendor 可能是**没有
+ * ref.mjs 的旧快照**（此时 vendor import 成功但不含该函数），故降级为旧形态而非抛错。
+ * id 始终是概念身份，这里只追加展示用路径。
+ */
+function formatRef(core: any, root: string, concept: any, opts?: { typePrefix?: string }): string {
+  if (typeof core.formatConceptRef === "function") {
+    try {
+      return core.formatConceptRef(root, concept, opts);
+    } catch {
+      // 渲染失败（异常 root 等）不该拖垮整个工具调用
+    }
+  }
+  const prefix = (opts && opts.typePrefix) || "";
+  return `${prefix}${concept && concept.type ? `${concept.type}: ` : ""}${(concept && concept.title) || ""}  (${(concept && concept.id) || ""})`;
+}
+
+/**
+ * 概念 id → 附加在 `# title  (id)` 行尾的绝对路径后缀；拿不到就返回空串（旧输出）。
+ * 用 core 的 conceptLinkTarget（含尖括号、内部已含 `?`/控制字符降级）——
+ * 尖括号必加：真实 bundle 形如 `.../Mobile Documents/iCloud~md~obsidian/...` 含空格，
+ * 不加 `<>` 会被 CommonMark 在第一个空格处截断。形态由 core 统一，避免五形态漂移。
+ */
+function absSuffix(core: any, root: string, id: string): string {
+  if (typeof core.conceptLinkTarget !== "function") return "";
+  try {
+    const target = core.conceptLinkTarget(root, id);
+    return target ? `  ->  ${target}` : "";
+  } catch {
+    return "";
+  }
+}
+
 function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void {
   const guidelines = () => [WIKI_GUIDELINES];
 
@@ -65,8 +152,8 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
     name: "wiki_list",
     label: "Wiki List",
     description:
-      "列出 llm-wiki 知识库（OKF v0.2 bundle）的目录树与概念清单（type/title/id）。【硬要求】做知识相关工作第一步先调用本工具看全貌。",
-    promptSnippet: "知识库列表：知识工作第一步先 wiki_list 看目录树与概念全貌",
+      "列出 llm-wiki 知识库（OKF v0.2 bundle）的目录概览（目录 → 概念数 + 类型分布 + 少量示例）。【硬要求】做知识相关工作第一步先调用本工具看全貌。本工具只给目录概览，不给全部条目：取具体内容用 wiki_search，已知 id 用 wiki_get。",
+    promptSnippet: "知识库列表：知识工作第一步先 wiki_list 看目录概览与概念全貌",
     promptGuidelines: guidelines(),
     parameters: Type.Object({
       type: Type.Optional(Type.String({ description: "按 type 过滤（Table / Attested Computation / Pitfall / Metric…）" })),
@@ -78,15 +165,9 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
         const dataDir = await resolveDir();
         const tree = await core.listBundle(dataDir, { type: params.type, status: params.status });
         if (!tree.length) return ok("（知识库为空或过滤后无概念）");
-        const lines: string[] = [];
-        for (const t of tree) {
-          lines.push(`[${t.dir || "(root)"}]`);
-          for (const c of t.concepts) {
-            lines.push(`  ${c.type}: ${c.title}  (${c.id})${c.status === "deprecated" ? " [deprecated]" : ""}`);
-          }
-        }
-        lines.push(`\n共 ${tree.reduce((n: number, t: any) => n + t.concepts.length, 0)} 个概念。`);
-        return ok(lines.join("\n"));
+        // 目录概览而非平铺：平铺会撞输出上限被字符级硬切（真实库 364 概念只完整给出 184 个）
+        const scopeNote = [params.type ? `type=${params.type}` : "", params.status ? `status=${params.status}` : ""].filter(Boolean).join(" ");
+        return ok(truncateOut(core, renderOverview(core, tree, scopeNote)));
       } catch (e) {
         return err(e);
       }
@@ -98,7 +179,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
     name: "wiki_search",
     label: "Wiki Search",
     description:
-      "搜索 llm-wiki 知识库：匹配 frontmatter（type/title/description/tags）+ 正文；词元拆分、量词后缀兜底、强匹配 ★ 排前；支持 type/tag 过滤。未命中提示 wiki_list / wiki_lint。",
+      "搜索 llm-wiki 知识库：匹配 frontmatter（type/title/description/tags）+ 正文；词元拆分、量词后缀兜底、强匹配 ★ 排前；支持 type/tag 过滤。未命中提示 wiki_list / wiki_lint。结果行尾的 `-> <路径>` 是该条目的真实文件路径，引用时用 `[标题](<路径>)` 原样复制（尖括号必须保留）。",
     promptSnippet: "知识库检索：用关键词/type/tag 缩小范围",
     promptGuidelines: guidelines(),
     parameters: Type.Object({
@@ -116,7 +197,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
         const graph = await core.buildGraph(dataDir);
         const res = core.searchGraph(graph, q, { type: params.type, tag: params.tag, limit: params.limit || 20 });
         if (!res.length) return ok("无匹配。若这是工作中真实存在的知识：可用 wiki_create 主动补录（探查类事实可直接记；口径/约定类先与用户确认）。或 wiki_list 看全貌 / wiki_lint 看缺失。");
-        return ok(res.map((r: any) => `${r.strong ? "★" : ""}${r.type}: ${r.title}  (${r.id})\n    ${r.description || ""}`).join("\n"));
+        return ok(res.map((r: any) => `${formatRef(core, dataDir, r, { typePrefix: r.strong ? "★" : "" })}\n    ${r.description || ""}`).join("\n"));
       } catch (e) {
         return err(e);
       }
@@ -127,7 +208,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
   pi.registerTool({
     name: "wiki_get",
     label: "Wiki Get",
-    description: "读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。",
+    description: "读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。标题行与 backlinks 行尾的 `-> <路径>` 是该条目的真实文件路径，引用时用 `[标题](<路径>)` 原样复制（尖括号必须保留）。",
     promptSnippet: "知识库明细：按 id/title 读单个概念全文 + backlinks",
     promptGuidelines: guidelines(),
     parameters: Type.Object({ id: Type.String({ description: "Concept ID（如 tables/orders）或 title" }) }),
@@ -139,13 +220,13 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
         if (!got) return ok(`未找到: ${params.id}。若这是工作中真实存在的概念，可用 wiki_create 主动补录（探查类事实可直接记）。或 wiki_list 看全貌。`);
         if (got.ambiguous) return ok(`标题「${params.id}」有多个候选: ${got.candidates.join(", ")}。请用完整 id。`);
         const lines = [
-          `# ${got.title}  (${got.id})`,
+          `# ${got.title}  (${got.id})${absSuffix(core, dataDir, got.id)}`,
           `type: ${got.type}${got.meta.status ? ` | status: ${got.meta.status}` : ""}${got.meta.runtime ? ` | runtime: ${got.meta.runtime}` : ""}`,
           "",
           got.desc || "",
           "",
           `--- backlinks (${got.backlinks.length}) ---`,
-          ...(got.backlinks.length ? got.backlinks.map((b: any) => `  ${b.type}: ${b.title}  (${b.id})`) : ["  （无入链）"]),
+          ...(got.backlinks.length ? got.backlinks.map((b: any) => `  ${formatRef(core, dataDir, b)}`) : ["  （无入链）"]),
           "",
           "--- body ---",
           got.body.trim(),
@@ -197,7 +278,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
           status: params.status,
           opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: PI_VERSION },
         });
-        return ok(`已创建 ${created.id}${await onlineFlush(core, dataDir, config)}`);
+        return ok(`已创建 ${created.id}${absSuffix(core, dataDir, created.id)}${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
         return err(e);
       }
@@ -235,7 +316,7 @@ function registerTools(pi: ExtensionAPI, config: Record<string, unknown>): void 
           tags: params.tags !== undefined ? listVal(params.tags) : undefined,
           opts: { confirmed: params.confirmed === true, user: params.user || "human:unknown", producer: "@sidleo3/pi-wiki", version: PI_VERSION },
         });
-        return ok(`已更新 ${params.id}${await onlineFlush(core, dataDir, config)}`);
+        return ok(`已更新 ${params.id}${absSuffix(core, dataDir, params.id)}${await onlineFlush(core, dataDir, config)}`);
       } catch (e) {
         return err(e);
       }

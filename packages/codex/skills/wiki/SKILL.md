@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 0.6.3
+version: 0.7.2
 description: >-
   使用 Codex 插件的 llm-wiki 工作知识库（OKF v0.2 markdown bundle）检索与沉淀知识。
   当任务要引用既有事实或结构（表、字段、接口、清单、术语、组织）、遵守既有约定或口径

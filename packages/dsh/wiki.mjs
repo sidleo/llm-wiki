@@ -20,14 +20,13 @@
  * ~/.agents/wiki-registry.json 合并，同名 config 优先）；wiki_use 会话级切换
  * （按对话 agent 隔离），global:true 持久化为全局默认。工具 schema 遵循宿主 DSL 形态。
  *
- * 图形化配置（设置 → 插件 → 插件配置）：
- * - 注册设置命名空间 dsh-wiki（skills 服务可选接入，见 registerSettingsNamespace），
- *   cordis 配置为 base 层、用户改动落在 ~/.dsh/settings.yaml，即时生效（live）；
+ * 图形化配置（设置 → llm-wiki 知识库；侧栏「插件」→ 本 bundle 页面）：
  * - 注册 /api/dsh-wiki/* 只读/写路由（webServer 可选接入）：命名 bundle 管理、
  *   在线同步（core git）、体检（validate/lint/index）；
  *   运行参数（dataDir/注入 section/上限/缓存 TTL）是部署级配置，只读 profile 的 cordis.patch.yml。
- * - 卡片本体在浏览器半 lib/client.js（src/client/index.ts 构建，见 tsdown.config.ts）。
- *   卡片 key 必须等于设置命名空间名：DSH 插件配置 Tab 只渲染 host 已服务命名空间的卡片。
+ * - 页面本体在浏览器半 lib/client.js（src/client/index.ts 构建，见 tsdown.config.ts），
+ *   注册进 DSH 0.1.7 的两个 slot：settings.section（设置里的独立区块）与
+ *   plugins.bundle.config（侧栏「插件」→ bundle 页面，key = 包名）。
  *
  * 在线同步：两种后端——本地目录 bundle 用 core git.mjs（Git 远端），
  * 飞书 bundle（kind:'feishu'，云盘文件夹存原生 .md）用 core feishu.mjs；
@@ -42,11 +41,8 @@ import { fileURLToPath } from 'node:url'
 export const name = 'wiki-registry'
 export const inject = ['systemPrompt', 'tools']
 
-/** 插件版本（写入门控的 producer 版本、卡片状态展示共用）。 */
-const PLUGIN_VERSION = '0.6.3'
-
-/** 设置命名空间（小写字母/数字/连字符）；卡片 key 必须与它一致（只为卡片可见性而注册）。 */
-const SETTINGS_NS = 'dsh-wiki'
+/** 插件版本（写入门控的 producer 版本、配置页状态展示共用）。 */
+const PLUGIN_VERSION = '0.7.5'
 
 // core 加载：优先同包 vendor-core（自包含安装），回退本仓库 packages/core（开发态）
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -67,6 +63,20 @@ async function loadCore() {
     }
   }
   return core
+}
+
+/**
+ * 回执里的概念引用：`id  ->  </abs/path.md>`（无 root / 不可链接时退回裸 id，不抛错）。
+ * id 仍是概念身份，绝对路径只作展示，供模型贴链接时被宿主正确解析。
+ */
+async function withAbsRef(root, id) {
+  try {
+    const c = await loadCore()
+    const target = c.conceptLinkTarget(root, id)
+    return target ? `${id}  ->  ${target}` : id
+  } catch {
+    return String(id)
+  }
 }
 
 const DEFAULTS = {
@@ -101,7 +111,7 @@ const SECTION_TEXT = [
   '- wiki_ingest — 登记外部源文件进 bundle；wiki_deprecate — 目录级批量停用（status: deprecated）',
   '- wiki_dirs — 查看已配置的目录分支；wiki_use <name> [global:true] — 切换当前分支（会话级/持久化全局默认）',
   '- wiki_sync — 在线知识库同步（按 bundle 后端分派）：本地目录走 Git 远端（status/sync/init/clone），飞书云盘库走 lark-cli（status/sync/pull/push/init，文件级增量、永不删两端）。冲突都停下来报清单，绝不 force/覆盖。见 wiki_help sync 与 wiki_help feishu。',
-  '- 图形化配置：设置 → 插件 → 插件配置 → llm-wiki 卡片（命名目录管理 / 在线同步 / 体检与索引）；运行参数属部署级，改 profile 的 cordis.patch.yml。',
+  '- 图形化配置：设置 → llm-wiki 知识库（或侧栏「插件」→ @sidleo3/dsh-wiki 页面）——命名目录管理 / 在线同步 / 体检与索引；运行参数属部署级，改 profile 的 cordis.patch.yml。',
   '- wiki_help — 查机制文档（保留文件/怎么写 AGENTS.md/怎么写 APPEND_SYSTEM_PROMPT.md/frontmatter/门控/多目录）。想给某分类加行为规则 → 在该目录建 APPEND_SYSTEM_PROMPT.md（正文即追加的 system prompt）；想定写门控 → 在该目录 AGENTS.md 写「## 门控」节。详情 wiki help。',
 ].join('\n')
 
@@ -139,16 +149,7 @@ function strErr(e) {
   return { text: `错误：${e && e.message ? e.message : String(e)}` }
 }
 
-// ──────────────────────────── 设置界面支撑（宿主半）────────────────────────────
-
-/** schemastery 是可选依赖：缺失时插件照常工作，只是不注册设置命名空间（卡片不出现）。 */
-async function loadSchemastery() {
-  try {
-    return (await import('schemastery')).default
-  } catch {
-    return null
-  }
-}
+// ──────────────────────────── 配置页支撑（宿主半）────────────────────────────
 
 /** bundle 名（注册表 key）合法性与保留名。 */
 function validateBundleName(name) {
@@ -256,7 +257,7 @@ function formatGitResult(action, r) {
 
 /**
  * 注册 /api/dsh-wiki/* 路由（webServer 可选接入；非 web 部署不注册，插件照常工作）。
- * 卡片（lib/client.js）只跟这些端点对话：命名 bundle 管理 / 参数 / 体检 / index / 在线同步。
+ * 配置页（lib/client.js）只跟这些端点对话：命名 bundle 管理 / 参数 / 体检 / index / 在线同步。
  */
 /** index.md / log.md 是派生文件（重生成 / 取并集），永不当作需要人工处理的冲突。 */
 function isDerivedFile(rel) {
@@ -264,14 +265,19 @@ function isDerivedFile(rel) {
   return base === 'index.md' || base === 'log.md'
 }
 
+/** 把注册动作绑到当前 fiber：宿主卸载 / 原地热替换时自动释放；没有 effect 能力的宿主（测试桩）直接执行。 */
+function bindLifecycle(ctx, register) {
+  return typeof ctx.effect === 'function' ? ctx.effect(register) : register()
+}
+
 function registerWebRoutes(ctx, deps) {
   const { effectiveConfig, loadCore, invalidateCaches, autosync } = deps
   const webServer = ctx.get('webServer')
   if (!webServer || typeof webServer.register !== 'function') return
 
-  const route = (path, handler) => webServer.register({ kind: 'exact', path, handler })
+  const route = (path, handler) => bindLifecycle(ctx, () => webServer.register({ kind: 'exact', path, handler }))
 
-  /** 解析目标 bundle：显式 name > 当前激活；未知名字抛错（卡片显示原文）。 */
+  /** 解析目标 bundle：显式 name > 当前激活；未知名字抛错（配置页显示原文）。 */
   async function target(core, name) {
     const cfg = effectiveConfig()
     return name ? core.resolveBundleRoot(cfg, { name: String(name) }) : core.resolveBundleRoot(cfg, {})
@@ -309,7 +315,6 @@ function registerWebRoutes(ctx, deps) {
       }
       jsonResponse(res, {
         ok: true,
-        settingsNamespace: SETTINGS_NS,
         active: { name: active.name, path: active.path },
         registryPath: c.registryFile(),
         entries,
@@ -628,16 +633,17 @@ function registerWebRoutes(ctx, deps) {
  * - **只跑飞书后端**：本地目录 bundle 的远端同步要处理合并/冲突，不适合无人值守自动跑；
  *   这里只对 kind:'feishu' 的 bundle 做「推本地改动 + 拉远端改动」（core 自己的三方状态判定，
  *   冲突仍会停下并只报告，绝不覆盖）。
- * - **只动「需要同步」的 bundle**：每次 tick 重新读配置（卡片改完即时生效，无需重启）。
+ * - **只动「需要同步」的 bundle**：每次 tick 重新读配置（配置页改完即时生效，无需重启）。
  * - **不并发**：同一 bundle 上一轮没跑完就跳过本轮；进程被杀留下的 runningSince 超过
  *   2 倍间隔 + 1 分钟视为陈旧自动接管。
- * - **失败不抛**：结果写回配置文件（lastRunAt/lastResult），卡片显示「上次同步」。
+ * - **失败不抛**：结果写回配置文件（lastRunAt/lastResult），配置页显示「上次同步」。
  *   定时器本身绝不因为一次同步失败而停掉——授权缺失是常态，恢复了就继续。
  * - **unref**：定时器不阻止进程退出。
  */
 export function createAutosync({ loadCore, effectiveConfig, invalidateCaches }) {
   const TICK_MS = 30_000 // 每 30s 检查一次到点与否（对 5 分钟间隔足够精细，且开销可忽略）
   let timer = null
+  let warm = null
   let ticking = false
   let lastTickAt = new Map() // bundle 名 → 上次执行的 ms
 
@@ -696,7 +702,7 @@ export function createAutosync({ loadCore, effectiveConfig, invalidateCaches }) 
     }
   }
 
-  /** 立即跑一次（卡片「立即同步」按钮；不看间隔，但尊重并发锁）。 */
+  /** 立即跑一次（配置页「立即同步」按钮；不看间隔，但尊重并发锁）。 */
   async function runNow(name) {
     const c = await loadCore()
     const cfg = effectiveConfig()
@@ -719,7 +725,7 @@ export function createAutosync({ loadCore, effectiveConfig, invalidateCaches }) 
     }
   }
 
-  /** 状态汇总（卡片用）：每个飞书 bundle 的设置 + 上次结果 + 下次预计时间。 */
+  /** 状态汇总（配置页用）：每个飞书 bundle 的设置 + 上次结果 + 下次预计时间。 */
   async function status() {
     const c = await loadCore()
     const bundles = await feishuBundles(c)
@@ -736,16 +742,20 @@ export function createAutosync({ loadCore, effectiveConfig, invalidateCaches }) 
     return { ok: true, file: c.autosyncFile(), running: Boolean(timer), tickSeconds: TICK_MS / 1000, bundles: rows }
   }
 
-  function start(ctx) {
+  function start() {
     if (timer) return
     timer = setInterval(() => void tick(), TICK_MS)
     if (typeof timer.unref === 'function') timer.unref()
     // 宿主启动 20s 后先跑一轮（避开启动风暴；未开启的 bundle 会被跳过）
-    const warm = setTimeout(() => void tick(), 20_000)
+    warm = setTimeout(() => void tick(), 20_000)
     if (typeof warm.unref === 'function') warm.unref()
   }
 
   function stop() {
+    if (warm) {
+      clearTimeout(warm)
+      warm = null
+    }
     if (!timer) return
     clearInterval(timer)
     timer = null
@@ -880,7 +890,8 @@ export function apply(ctx, config) {
       const text = await getContextText(active, agent)
       if (text && assembly && Array.isArray(assembly.contexts)) {
         const existing = assembly.contexts.findIndex((c) => c && c.name === CONTEXT_NAME)
-        const context = { name: CONTEXT_NAME, order: cfg.contextOrder, text }
+        // 正文含用户可写的 APPEND 规则：禁止宿主做 {{var}} 插值（0.2.1 起 context 支持该开关）
+        const context = { name: CONTEXT_NAME, order: cfg.contextOrder, text, interpolate: false }
         if (existing >= 0) assembly.contexts[existing] = context
         else assembly.contexts.push(context)
       }
@@ -930,40 +941,26 @@ export function apply(ctx, config) {
   // —— 定时自动同步控制器（配置读写走 core，定时器在本插件内）——
   const autosync = createAutosync({ loadCore, effectiveConfig, invalidateCaches })
 
-  // —— 设置命名空间（可选服务）：只作为「插件配置卡片」的可见性钥匙 ——
-  // DSH 的插件配置 Tab 只渲染「宿主已服务命名空间 ∩ 已注册卡片」，卡片 key = 本命名空间。
-  // 运行参数不在这里配置（schema 为空）：部署级参数改 profile 的 cordis.patch.yml。
-  const schemaPromise = loadSchemastery()
-  ctx.inject(['settings'], (settingsCtx) => {
-    void (async () => {
-      try {
-        const z = await schemaPromise
-        if (!z) return
-        const svc = settingsCtx.get('settings')
-        if (!svc || typeof svc.register !== 'function') return
-        svc.register(SETTINGS_NS, z.object({}), { applies: 'live' })
-      } catch {
-        // 注册失败（无 schemastery / 命名空间冲突）不影响插件本体：工具与注入照常
-      }
-    })()
-  })
-
-  // —— 图形化配置 RPC（可选服务 webServer；非 web 部署不注册）——
+  // —— 配置页 RPC（可选服务 webServer；非 web 部署不注册）——
   ctx.inject(['webServer'], (webCtx) => {
     registerWebRoutes(webCtx, { effectiveConfig, loadCore, invalidateCaches, autosync })
   })
 
   // —— 定时自动同步（本插件内跑；配置在 ~/.agents/wiki-autosync.json）——
   ctx.inject(['tools'], (syncCtx) => {
-    autosync.start(syncCtx)
+    bindLifecycle(syncCtx, () => {
+      autosync.start()
+      return () => autosync.stop()
+    })
   })
 
   // —— wiki_list ——
   ctx.tools.register({
     name: 'wiki_list',
     description: [
-      '列出 llm-wiki 知识库（OKF v0.2 bundle）的目录树与概念清单。',
+      '列出 llm-wiki 知识库（OKF v0.2 bundle）的目录概览（目录 → 概念数 + 类型分布 + 少量示例）。',
       '【硬要求】做任何知识相关工作的第一步，必须先调用本工具看全貌，再决定下一步。',
+      '本工具只给目录概览，不给全部条目：取具体内容用 wiki_search，已知 id 用 wiki_get。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -979,16 +976,9 @@ export function apply(ctx, config) {
         const dataDir = (await resolveActive(exec && exec.agent)).path
         const tree = await c.listBundle(dataDir, { type: args.type, status: args.status })
         if (!tree.length) return { text: '（知识库为空或过滤后无概念）' }
-        const lines = []
-        for (const t of tree) {
-          lines.push(`[${t.dir || '(root)'}]`)
-          for (const item of t.concepts) {
-            lines.push(`  ${item.type}: ${item.title}  (${item.id})${item.status === 'deprecated' ? ' [deprecated]' : ''}`)
-          }
-        }
-        const total = tree.reduce((n, t) => n + t.concepts.length, 0)
-        lines.push(`\n共 ${total} 个概念。`)
-        return { text: lines.join('\n').slice(0, effectiveConfig().maxGetChars) }
+        const scopeNote = [args.type ? `type=${args.type}` : '', args.status ? `status=${args.status}` : ''].filter(Boolean).join(' ')
+        const text = c.renderOverview(tree, { scopeNote })
+        return { text: c.truncateByLine(text, effectiveConfig().maxGetChars) }
       } catch (e) { return strErr(e) }
     },
   })
@@ -999,6 +989,7 @@ export function apply(ctx, config) {
     description: [
       '搜索 llm-wiki 知识库：匹配 frontmatter（type/title/description/tags）+ 正文；支持词元拆分与量词后缀兜底；强匹配标 ★ 排前。',
       '支持 type 与 tag 过滤。未命中会提示用 wiki_list / wiki_lint。',
+      '结果行尾的 `-> <路径>` 是该条目的真实文件路径，引用时用 `[标题](<路径>)` 原样复制（尖括号必须保留）。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -1020,7 +1011,7 @@ export function apply(ctx, config) {
         const graph = await c.buildGraph(dataDir)
         const res = c.searchGraph(graph, q, { type: args.type, tag: args.tag, limit: Number(args.limit) || 20 })
         if (!res.length) return { text: '无匹配。若你正在用的知识确实不在库中，这是主动记录信号——用 wiki_create 建概念（探查类事实可直接记；口径/约定类先向用户展示确认）。也可 wiki_list 看全貌或 wiki_lint 看缺失清单。' }
-        const lines = res.map((r) => `${r.strong ? '★' : ''}${r.type}: ${r.title}  (${r.id})\n    ${r.description || ''}`)
+        const lines = res.map((r) => `${c.formatConceptRef(dataDir, r, { typePrefix: r.strong ? '★' : '' })}\n    ${r.description || ''}`)
         return { text: lines.join('\n').slice(0, effectiveConfig().maxGetChars) }
       } catch (e) { return strErr(e) }
     },
@@ -1029,7 +1020,10 @@ export function apply(ctx, config) {
   // —— wiki_get ——
   ctx.tools.register({
     name: 'wiki_get',
-    description: '读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。',
+    description: [
+      '读取单个概念完整正文（id 或 title）。自动附 backlinks：引用它的概念（坑点/口径等），无需额外字段。',
+      '标题行与 backlinks 行尾的 `-> <路径>` 是该条目的真实文件路径，引用时用 `[标题](<路径>)` 原样复制（尖括号必须保留）。',
+    ].join('\n'),
     parameters: {
       type: 'object',
       properties: { id: { type: 'string', description: 'Concept ID（如 tables/orders）或 title' } },
@@ -1044,13 +1038,13 @@ export function apply(ctx, config) {
         if (!got) return { text: `未找到: ${args.id}。若这是你工作中真实存在的概念，可用 wiki_create 主动补录（探查类事实可直接记）。或 wiki_list 看全貌。` }
         if (got.ambiguous) return { text: `标题「${args.id}」有多个候选: ${got.candidates.join(', ')}。请用完整 id。` }
         const lines = [
-          `# ${got.title}  (${got.id})`,
+          `${c.formatConceptRef(dataDir, got, { typePrefix: '# ' })}`,
           `type: ${got.type}${got.meta.status ? ` | status: ${got.meta.status}` : ''}${got.meta.runtime ? ` | runtime: ${got.meta.runtime}` : ''}`,
           '',
           got.desc || '',
           '',
           `--- backlinks (${got.backlinks.length}) ---`,
-          ...(got.backlinks.length ? got.backlinks.map((b) => `  ${b.type}: ${b.title}  (${b.id})`) : ['  （无入链）']),
+          ...(got.backlinks.length ? got.backlinks.map((b) => `  ${c.formatConceptRef(dataDir, b)}`) : ['  （无入链）']),
           '',
           '--- body ---',
           got.body.trim(),
@@ -1112,7 +1106,7 @@ export function apply(ctx, config) {
             version: PLUGIN_VERSION,
           },
         })
-        return { text: `已创建 ${created.id}${await onlineFlush(c, dataDir)}` }
+        return { text: `已创建 ${await withAbsRef(dataDir, created.id)}${await onlineFlush(c, dataDir)}` }
       } catch (e) { return strErr(e) }
     },
   })
@@ -1146,7 +1140,7 @@ export function apply(ctx, config) {
         const blocked = await onlineGuard(c, dataDir, [`${args.id}.md`])
         if (blocked) return { text: blocked }
         await c.updateConcept(dataDir, args.id, patch)
-        return { text: `已更新 ${args.id}${await onlineFlush(c, dataDir)}` }
+        return { text: `已更新 ${await withAbsRef(dataDir, args.id)}${await onlineFlush(c, dataDir)}` }
       } catch (e) { return strErr(e) }
     },
   })
@@ -1264,7 +1258,7 @@ export function apply(ctx, config) {
     description: [
       '查看全部 wiki 目录分支（命名 bundle）与当前激活项。',
       'bundle 来源：注册表 ~/.agents/wiki-registry.json ∪ 插件配置 dataDirs（同名配置优先）；隐式 default = dataDir 兜底。',
-      '注册新目录：设置 → 插件 → 插件配置 → llm-wiki 卡片（或直接编辑注册表 / 插件配置 dataDirs）；切换用 wiki_use。详见 wiki_help bundle。',
+      '注册新目录：设置 → llm-wiki 知识库（或直接编辑注册表 / 插件配置 dataDirs）；切换用 wiki_use。详见 wiki_help bundle。',
     ].join('\n'),
     parameters: { type: 'object', properties: {} },
     output: out,

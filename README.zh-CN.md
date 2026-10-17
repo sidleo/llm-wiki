@@ -22,7 +22,7 @@
   - **本地目录 + Git 远端**：提交→拉取合并→推送，多机/多人协作；**绝不 force push**。
   - **飞书云盘库**：内容存在飞书云空间的文件夹里，就是**一组原生 `.md` 文件**（OKF 格式零损失），经 `lark-cli` 文件级增量读写；人在飞书里浏览/下载，agent 负责读与写。
   两种后端同一套冲突规则：`index.md` 本地重生成、`log.md` 取并集（不阻塞）；概念 / `AGENTS.md` 两侧都改则**停止同步并报清单**，绝不自动覆盖。飞书后端**永不删除两端文件**（删除只报告）。
-- **图形化配置（DSH Web GUI）**——设置 → 插件 → 插件配置里的 llm-wiki 卡片：命名目录增删/改名/设默认、在线同步状态与一键同步/初始化/克隆、体检（validate/lint 计数 + 重建 index）。运行参数属部署级配置（profile 的 `cordis.patch.yml`），卡片刻意不提供编辑。
+- **图形化配置（DSH Web GUI，DSH 0.1.7-rc.2 起；0.2.1-rc.2 已复核）**——同一个页面注册进两处：**设置 → llm-wiki**，以及**侧栏「插件」→ `@sidleo3/dsh-wiki`** 页面。命名目录增删/改名/设默认、在线同步状态与一键同步/初始化/克隆、定时自动同步、体检（validate/lint 计数 + 重建 index）。运行参数属部署级配置（profile 的 `cordis.patch.yml`），页面刻意不提供编辑。
 
 ## Wiki 目录结构（bundle）
 
@@ -131,7 +131,7 @@ wiki sync delete <路径...> --apply  # 执行
 
 ### 图形化配置（DSH Web GUI）
 
-设置 → 插件 → 插件配置 → llm-wiki 卡片（ADR：宿主按「已服务设置命名空间 ∩ 已注册卡片」渲染，卡片 key = `dsh-wiki`）：
+设置 → **llm-wiki**（或侧栏「插件」→ `@sidleo3/dsh-wiki` 页面；DSH 0.1.7 起同一页面注册进这两个 slot，slot 契约已在 0.2.1-rc.2 复核）：
 
 | 区块 | 能改什么 | 落到哪 |
 |------|----------|--------|
@@ -141,7 +141,7 @@ wiki sync delete <路径...> --apply  # 执行
 | 定时自动同步 | 开关、间隔（默认 5 分钟）、飞书身份，附「立即同步一次」与上次结果 | `~/.agents/wiki-autosync.json`（每台机器一份），由插件内定时器驱动 |
 | 体检与索引 | validate/lint 计数与明细、重建 index | core `validateBundle`/`lintBundle`/`refreshIndex` |
 
-（运行参数不在卡片里：数据目录、注入 section 名/order、各上限、缓存 TTL 都是部署级配置，改 profile 的 `cordis.patch.yml`。）
+（运行参数不在配置页里：数据目录、注入 section 名/order、各上限、缓存 TTL 都是部署级配置，改 profile 的 `cordis.patch.yml`。）
 
 ## 多目录（命名 bundle）
 
@@ -185,16 +185,23 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 ## 测试
 
 ```bash
+node --test                               # 全量 214 项 —— 别用 `tests/*.test.mjs` 通配：它会静默漏掉 `*-test.mjs` 的 DSH 测试
 node scripts/smoke-test.mjs              # 36 项：core 工具链 + 注册表 + ingest/lint 端到端
 node tests/dsh-mock-test.mjs             # 35 项：DSH 插件（mock 宿主）工具注册 + 注入分层 + 门控 + 多目录 + 同步诊断
-node --test tests/dsh-config-test.mjs    # 14 项：配置卡片宿主半（设置命名空间 + /api/dsh-wiki/* 路由）
+node --test tests/dsh-config-test.mjs    # 14 项：配置页宿主半（/api/dsh-wiki/* 路由）
 node --test tests/git-sync.test.mjs      # 8 项：Git 远端同步（顺序写/并发 log/index 冲突/概念冲突/错误路径）
 node --test tests/feishu-backend.test.mjs # 25 项：飞书云盘后端（三方差异/只推改动/冲突停止/log 并集/argv 安全黑名单）
-node --test tests/dsh-client-bundle-test.mjs   # 5 项：卡片产物契约 + jsdom 渲染冒烟
-(cd packages/pi && npm install --legacy-peer-deps && npm test)   # 15 项：pi 扩展（mock pi）
+node --test tests/dsh-client-bundle-test.mjs   # 8 项：配置页产物契约（两个 slot）+ jsdom 渲染冒烟
+node --test tests/dsh-020-contract-test.mjs    # 9 项：DSH 0.2.0 契约离线固化（基线模块 / peer 门 / 两个 slot / 宿主半工具与路由）
+(cd packages/pi && npm install --legacy-peer-deps && npm test)   # 16 项：pi 扩展（mock pi）
 (cd packages/mcp && npm install && npm test)   # 17 项：MCP 形态（SDK stdio 客户端端到端 + 与 DSH 插件工具/输出对拍 + stdout 纯净）
 (cd packages/codex && npm test)               # 10 项：Codex 插件（manifest/hook + 零依赖 MCP + 与 MCP/DSH 工具契约对拍）
 node --test tests/three-forms.test.mjs   # 5 项：三形态读写同一 bundle 一致性
+node --test tests/ref-abs-path.test.mjs  # 19 项：概念引用带真实绝对路径（尖括号包裹）、id 语义未被污染、cwd 相对解析死链锁死
+node --test tests/overview.test.mjs      # 24 项：wiki_list 全量清单（每条标题都列出、不带绝对路径、不静默截断、不切断半行）
+node --test tests/vendor-sync.test.mjs   # 4 项：vendor-core 快照与 packages/core 逐字节一致（守「改 core 忘同步 vendor」的假绿）
+#   ^ 同时追加进 packages/{mcp,pi,codex} 的 test script：这些形态优先加载 vendor-core，
+#     快照落后就会静默跑旧逻辑 —— 闸门必须跑在它们跑的地方，否则形同虚设。
 ```
 
 ## 许可

@@ -22,7 +22,7 @@ An open-source, generic, agent-first knowledge base: **the format layer strictly
   - **Local directory + Git remote**: commit → fetch/merge → push for multi-machine collaboration; force-push is never used.
   - **Feishu cloud drive**: the bundle lives in a Feishu Drive folder as a tree of **native `.md` files** (zero OKF format loss), read and written file-by-file through `lark-cli`; humans browse/download in Feishu, agents do the reading and writing.
   Both backends share one conflict policy: `index.md` is regenerated locally, `log.md` is merged as a union (never blocks), and a concept / `AGENTS.md` changed on both sides **stops the sync with a conflict list** — nothing is auto-overwritten. The Feishu backend **never deletes files on either side** (deletions are only reported).
-- **Graphical configuration (DSH Web GUI)** — an llm-wiki card under Settings → Plugins → Plugin configuration: named directories (add/rename/remove/set default), Git remote status with one-click sync/init/clone, and a health panel (validate/lint counts + rebuild index). Runtime parameters are deployment-level (the profile's `cordis.patch.yml`) and are deliberately not editable from the card.
+- **Graphical configuration (DSH Web GUI, DSH 0.1.7-rc.2+; re-verified against 0.2.1-rc.2)** — one page registered into two slots: **Settings → llm-wiki** and the **sidebar Plugins → `@sidleo3/dsh-wiki`** page. Named directories (add/rename/remove/set default), online-sync status with one-click sync/init/clone, scheduled auto-sync, and a health panel (validate/lint counts + rebuild index). Runtime parameters are deployment-level (the profile's `cordis.patch.yml`) and are deliberately not editable from the page.
 
 ## The Wiki Bundle (Directory Structure)
 
@@ -131,7 +131,7 @@ Three-way state lives in the cache's `.wiki-cloud.json` (fileToken, remote `modi
 
 ### Graphical configuration (DSH Web GUI)
 
-Settings → Plugins → Plugin configuration → llm-wiki card (the host renders the intersection of *served settings namespaces* and *registered cards*; the card key is `dsh-wiki`):
+Settings → **llm-wiki** (or the sidebar **Plugins** → `@sidleo3/dsh-wiki` page — the same page registers into both slots since DSH 0.1.7, and the slot contract was re-verified on DSH 0.2.1-rc.2):
 
 | Section | What it edits | Where it lands |
 |---------|---------------|----------------|
@@ -141,7 +141,7 @@ Settings → Plugins → Plugin configuration → llm-wiki card (the host render
 | Scheduled auto-sync | on/off, interval (default 5 min), identity, plus "sync now" and last-run status | `~/.agents/wiki-autosync.json` (per machine), driven by the plugin's in-host timer |
 | Health & index | validate/lint counts and details, rebuild index | core `validateBundle` / `lintBundle` / `refreshIndex` |
 
-(Runtime parameters are not in the card: data dir, injection section name/order, limits and cache TTL are deployment-level and live in the profile's `cordis.patch.yml`.)
+(Runtime parameters are not in the page: data dir, injection section name/order, limits and cache TTL are deployment-level and live in the profile's `cordis.patch.yml`.)
 
 ## Multiple Bundles (Named Directories)
 
@@ -185,18 +185,25 @@ node packages/skill/bin/wiki.mjs get tables/orders --dataDir examples/demo-bundl
 ## Testing
 
 ```bash
+node --test                               # whole suite, 214 checks — do not use a `tests/*.test.mjs` glob: it silently skips the `*-test.mjs` DSH files
 node scripts/smoke-test.mjs              # 36 checks: core tool chain + registry + ingest/lint end-to-end
 node tests/dsh-mock-test.mjs             # 35 checks: DSH plugin (mock host) tools + injection layers + gates + multi-bundle + sync
-node --test tests/dsh-config-test.mjs    # 14 checks: config card host half (settings namespace + /api/dsh-wiki/* routes, incl. handler execution)
+node --test tests/dsh-config-test.mjs    # 14 checks: configuration page host half (/api/dsh-wiki/* routes, incl. handler execution)
 node --test tests/git-sync.test.mjs      # 8 checks: Git remote sync (sequential writes / concurrent log / index / concept conflicts)
 node --test tests/feishu-backend.test.mjs # 25 checks: Feishu cloud-drive backend (3-way diff, changed-files-only, conflict stop, log union, argv safety, user/bot identity selection)
 node --test tests/autosync.test.mjs      # 17 checks: scheduled auto-sync (config persistence, interval/identity clamping, run recording, scheduler + conflict safety)
 node --test tests/feishu-delete.test.mjs # 11 checks: real deletion (explicit-paths-only, refuses unsynced-side deletes, dry-run default, no resurrection, stop-on-first-failure, CLI end-to-end)
-node --test tests/dsh-client-bundle-test.mjs   # 5 checks: card bundle contract + jsdom render smoke
-(cd packages/pi && npm install --legacy-peer-deps && npm test)   # 15 checks: pi extension (mock pi)
+node --test tests/dsh-client-bundle-test.mjs   # 8 checks: config page bundle contract (both slots) + jsdom render smoke
+node --test tests/dsh-020-contract-test.mjs    # 9 checks: DSH 0.2.0 contract pinned offline (baseline modules / peer gate / both slots / host tools + routes)
+(cd packages/pi && npm install --legacy-peer-deps && npm test)   # 16 checks: pi extension (mock pi)
 (cd packages/mcp && npm install && npm test)   # 17 checks: MCP form (SDK stdio client end-to-end + tool/output parity with the DSH plugin + stdout purity)
 (cd packages/codex && npm test)               # 10 checks: Codex plugin (manifest/hook + zero-dependency MCP + tool-contract parity)
 node --test tests/three-forms.test.mjs   # 5 checks: all three forms read/write the same bundle consistently
+node --test tests/ref-abs-path.test.mjs  # 19 checks: concept refs carry a real absolute path (angle-bracketed), id semantics intact, cwd-mismatch dead link locked out
+node --test tests/overview.test.mjs      # 24 checks: wiki_list full inventory (every title listed, no absolute paths, no silent truncation, no split lines)
+node --test tests/vendor-sync.test.mjs   # 4 checks: vendor-core snapshots byte-identical to packages/core (guards the "edited core, forgot vendor" false-green)
+#   ^ also appended to packages/{mcp,pi,codex} test scripts: those load vendor-core first, so a
+#     stale snapshot makes them silently run old logic — the guard has to run where they do.
 ```
 
 ## License

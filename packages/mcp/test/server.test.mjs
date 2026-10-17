@@ -88,9 +88,16 @@ describe('MCP server 端到端（stdio）', () => {
   })
 
   test('wiki_list / wiki_search / wiki_get 正常返回', async () => {
+    // wiki_list 现为「全量清单」：逐条列出标题 + [type]，但**不含绝对路径**
+    // （路径是长度的元凶，去掉后同样全量只要 ~20K，容量提升约 4 倍）。
     const list = await call('wiki_list')
-    assert.match(list.text, /\[tables\]/)
-    assert.match(list.text, /共 11 个概念。/)
+    assert.match(list.text, /知识库清单（\d+ 个目录 \/ 11 个概念）/)
+    assert.match(list.text, /^tables  — 3 个/m)
+    assert.match(list.text, /【怎么用】/)
+    // 全量：11 个条目一行一条，无示例省略
+    assert.equal(list.text.split('\n').filter((l) => /^\s+·\s+/.test(l)).length, 11)
+    assert.ok(!/另\s*\d+\s*个/.test(list.text), '全量清单不该有「另 N 个」省略')
+    assert.ok(!list.text.includes('->'), '清单不含绝对路径')
 
     const search = await call('wiki_search', { query: '销售额' })
     assert.match(search.text, /pitfalls\/join-inflation/)
@@ -155,7 +162,7 @@ describe('MCP server 端到端（stdio）', () => {
     assert.match(after.text, /← 当前进程/)
 
     const listNow = await call('wiki_list')
-    assert.match(listNow.text, /共 11 个概念。/) // 已切到 tmp2（同为 demo 副本）
+    assert.match(listNow.text, /\d+ 个目录 \/ 11 个概念/) // 已切到 tmp2（同为 demo 副本）
 
     const global = await call('wiki_use', { name: '其他', global: true })
     assert.match(global.text, /已持久化为全局默认/)
@@ -237,6 +244,6 @@ describe('stdio 协议纯净性', () => {
     assert.equal(list.result.tools.length, 14)
 
     const call = frames.find((f) => f.id === 3)
-    assert.match(call.result.content[0].text, /共 11 个概念。/)
+    assert.match(call.result.content[0].text, /知识库清单/)
   })
 })
